@@ -8,18 +8,28 @@ Running now on this machine: `http://127.0.0.1:8083` (public:
 `https://sport.taila73942.ts.net/resmara/`, operator console `/resmara/admin.html`,
 API explorer `/resmara/docs`).
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/dannyphantom303/resmara)
+
 **Hosting it somewhere else?** Read [`DEPLOY.md`](DEPLOY.md) — container/compose files,
 the `.env` values a real host must set, the two scheduled jobs, the Meta settings for a new
 domain, backups, and what is deliberately not built yet (billing, outbound email). Ship the
 code with `./scripts/make_deploy_bundle.sh` (never includes `.env`, the database or uploads)
 and verify any deployment, old or new, with `python scripts/selfcheck.py --base <url>`.
 
+**Or let the repository host it.** [`render.yaml`](render.yaml) declares the service *and* the
+database, so the button above is the whole setup: Render reads the Blueprint, asks once for
+`META_CLIENT_SECRET`, and every merge to `main` deploys (`.github/workflows/ci.yml` gates it).
+Read [`DEPLOY.md` §3b](DEPLOY.md) first — a free plan's database expires in 30 days and its
+uploads are ephemeral.
+
 ## Test
 
 ```sh
-./scripts/run_tests.sh                     # every isolated suite; node tests skip if absent
-PYTHON=venv/bin/python ./scripts/run_tests.sh
+PYTHON=venv/bin/python bash scripts/run_tests.sh   # all isolated suites; node suites skip if absent
 ```
+
+CI runs exactly that on every push, in a checkout with no `.env` — so a suite that borrows
+settings from the developer's environment fails there even when it passes locally.
 
 Live checks need a running server: `venv/bin/python tests/smoke_live.py` and
 `python scripts/selfcheck.py --base http://127.0.0.1:8083 --full`.
