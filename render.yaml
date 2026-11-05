@@ -8,6 +8,8 @@ databases:
     databaseName: resmara
     user: resmara
     plan: free          # free Postgres expires 30 days after creation — see DEPLOY.md §3b
+    ipAllowList: []     # private network only: the service reaches it, the internet does not.
+                        # To connect from a laptop, add that IP in the dashboard.
 
 services:
   - type: web
@@ -16,7 +18,7 @@ services:
     plan: free          # free web services sleep after ~15 min idle; see DEPLOY.md §3b
     dockerfilePath: ./Dockerfile
     healthCheckPath: /openapi.json
-    autoDeploy: true
+    autoDeployTrigger: commit   # merging to main is the deploy (autoDeploy: true is deprecated)
     envVars:
       - key: DATABASE_URL
         fromDatabase:
