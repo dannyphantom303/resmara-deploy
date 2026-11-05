@@ -30,6 +30,13 @@ _tmp.close()
 DB_PATH = _tmp.name
 os.environ["DATABASE_URL"] = f"sqlite:///{DB_PATH}"
 os.environ.pop("RESMARA_SIMULATE", None)
+# The suite brings the values it needs instead of inheriting a developer's .env: a clean
+# runner (CI has no .env) then exercises exactly what the box that has one does.
+os.environ["RESMARA_PUBLISH_TOKEN"] = "test-sweep-token"
+# Token inspection refuses to claim anything without an app id to check the token against
+# ("Meta app credentials are not configured"), so the suite supplies its own.
+os.environ["META_CLIENT_ID"] = "app_test_0000000000"
+os.environ["META_CLIENT_SECRET"] = "secret_test_0000000000"
 
 ADVERTISER = "act_777000111"
 LONG_TOKEN = "long-lived-token-A"
@@ -153,10 +160,10 @@ from app.services import token_health                          # noqa: E402
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 
-# The app loads its own .env at import (config.py), so META_CLIENT_ID/SECRET and
-# RESMARA_PUBLISH_TOKEN come from there. GRAPH_API_BASE was set above, which is what
-# settings.graph_base reads - the app under test therefore talks to the mock Graph and
-# never to Facebook. Nothing here prints or asserts on the real secret.
+# META_CLIENT_ID/SECRET, META_SCOPES and RESMARA_PUBLISH_TOKEN were set above, before the app
+# imported them, so this passes with or without a .env on the box. GRAPH_API_BASE was set above
+# too, which is what settings.graph_base reads - the app under test therefore talks to the mock
+# Graph and never to Facebook. Nothing here prints or asserts on a real secret.
 STATE["app_id"] = settings.META_CLIENT_ID
 
 checks = 0

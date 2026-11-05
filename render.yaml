@@ -1,0 +1,54 @@
+# Render Blueprint — the repository is the deployment.
+#
+# Render reads this file, builds ./Dockerfile, creates the database, wires the connection
+# string in, and redeploys on every merge to main. Anything marked sync:false is asked for
+# once in the dashboard and never stored in git.
+databases:
+  - name: resmara-db
+    databaseName: resmara
+    user: resmara
+    plan: free          # free Postgres expires 30 days after creation — see DEPLOY.md §3b
+
+services:
+  - type: web
+    name: resmara
+    runtime: docker
+    plan: free          # free web services sleep after ~15 min idle; see DEPLOY.md §3b
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /openapi.json
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resmara-db
+          property: connectionString
+      - key: RESMARA_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: RESMARA_PUBLISH_TOKEN
+        generateValue: true
+      # No RESMARA_PUBLIC_BASE_URL / META_REDIRECT_URI: the app reads RENDER_EXTERNAL_URL and
+      # derives the callback from it, so the origin follows whatever host Render assigns.
+      - key: META_CLIENT_ID
+        value: "1881970083170197"
+      - key: META_CLIENT_SECRET
+        sync: false     # Meta → App settings → Basic. The one value Render has to be told.
+      - key: META_SCOPES
+        value: >-
+          ads_management,business_management,pages_read_engagement,pages_show_list,pages_manage_posts,instagram_basic,instagram_content_publish
+      # Content engine: any OpenAI-compatible endpoint. The build box points at Ollama on
+      # localhost, which a hosted instance cannot reach. Unset, the engine honestly reports
+      # source="unavailable" and generates nothing; everything else keeps working.
+      # - key: RESMARA_ENGINE_BASE_URL    # e.g. https://api.openai.com/v1
+      #   sync: false
+      # - key: RESMARA_ENGINE_API_KEY
+      #   sync: false
+      # - key: RESMARA_MODEL_RESEARCH     # likewise _PLAN, _BRAND, _CHECK
+      #   sync: false
+      # Encrypts connected ad-account tokens at rest. Left unset deliberately: an invalid value
+      # makes every token write fail and Render cannot generate a valid Fernet key. Unset, the
+      # app derives a stable key from SECRET_KEY. To pin it instead:
+      #   python scripts/make_token_key.py  → paste the output into RESMARA_TOKEN_KEY
+      # - key: RESMARA_TOKEN_KEY
+      #   sync: false

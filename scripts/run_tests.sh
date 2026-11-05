@@ -30,11 +30,15 @@ for t in tests/test_*.py; do
   run "$(basename "$t" .py)" "$PY" "$t"
 done
 
-if command -v node >/dev/null 2>&1; then
-  run test_frontend_api node tests/test_frontend_api.js
-  run test_deployed_ui  node tests/test_deployed_ui.js
-else
+if ! command -v node >/dev/null 2>&1; then
   echo "skip node suites (node not installed)"
+else
+  run test_frontend_api node tests/test_frontend_api.js
+  if [ -n "${CI_SKIP_DEPLOYED_UI:-}" ]; then
+    echo "skip test_deployed_ui (CI_SKIP_DEPLOYED_UI set: it reads a deployment's public URL)"
+  else
+    run test_deployed_ui node tests/test_deployed_ui.js
+  fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL SUITES PASSED" || echo "SUITE FAILURES"

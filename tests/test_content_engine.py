@@ -16,6 +16,7 @@ import re
 import sys
 import tempfile
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -91,7 +92,7 @@ OPENINGS = {
 # ===========================================================================
 section("prompt fidelity (verbatim from engine_spec/prompts.json)")
 # ===========================================================================
-SPEC = json.loads(open("/Users/dan/resmara/engine_spec/prompts.json").read())
+SPEC = json.loads((Path(__file__).resolve().parents[1] / "engine_spec" / "prompts.json").read_text())
 K_R1 = '10_AI_build_the_campaign.md :: R1 — "AI research: look the property up on public pages" :: #1'
 K_R2S = '10_AI_build_the_campaign.md :: R2 — "AI call 1: learn the agent\'s brand" :: #2'
 K_R2U = '10_AI_build_the_campaign.md :: R2 — "AI call 1: learn the agent\'s brand" :: #3'

@@ -59,6 +59,39 @@ so `/` on a dedicated domain is fine.
 
 ---
 
+## 3b. Managed hosting straight from this repository
+
+The repository carries everything a managed host needs — nothing is configured by hand:
+
+| File | What it does |
+|---|---|
+| `Dockerfile` + `docker-entrypoint.sh` | Builds the service; starts as root only to fix the volume's ownership, then drops to uid 10001 |
+| `render.yaml` | Render Blueprint: creates the web service **and** the database, wires `DATABASE_URL`, generates `SECRET_KEY` and `RESMARA_PUBLISH_TOKEN`, sets the Meta app id and scopes, turns on `autoDeploy` |
+| `.github/workflows/ci.yml` | Runs the whole suite, boots the app from a clean environment and self-checks it on every push and pull request |
+
+On Render: **New → Blueprint → pick this repository.** It reads `render.yaml`, asks once for
+`META_CLIENT_SECRET` (from Meta → App settings → Basic), and deploys. Every later merge to
+`main` redeploys by itself.
+
+No hostname is typed anywhere: Render injects `RENDER_EXTERNAL_URL`, the app uses it as
+`PUBLIC_BASE_URL` and derives `META_REDIRECT_URI` from it. Add that callback to the Meta app
+(§8) once the first URL is known.
+
+Three things the free plan costs, fine for a demo and none of them fine for a paying client:
+
+| Trap | Detail | Fix before real clients |
+|---|---|---|
+| The free database expires | Render deletes it 30 days after creation | Upgrade the database (~$6/month), or point `DATABASE_URL` at Supabase and keep one system of record |
+| Uploads are ephemeral | Free instances get no persistent disk, so `UPLOAD_DIR` is wiped on each deploy — and Instagram fetches post media by public URL, so a wiped file is a failed post | A paid disk, or an object store (Supabase Storage / S3) plus an S3 backend in `app` |
+| It sleeps | A free web service stops after ~15 min idle; the next request pays a cold start | Paid instance type, or the VPS above |
+
+One gap no host can fill: the content engine needs an OpenAI-compatible endpoint
+(`RESMARA_ENGINE_BASE_URL` + `RESMARA_ENGINE_API_KEY`). The build box points at Ollama on
+localhost, which a hosted instance cannot reach — without the partner's own key the engine
+reports `source="unavailable"` and generates nothing. Everything else works without it.
+
+---
+
 ## 4. Deploying with Docker Compose
 
 On the host:

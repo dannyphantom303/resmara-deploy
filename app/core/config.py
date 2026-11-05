@@ -29,7 +29,14 @@ class Settings(BaseSettings):
 
     # Where this app is publicly reachable. Needed for Meta callbacks AND for Instagram,
     # which fetches post media by URL (Graph has no direct file upload for IG feed posts).
-    PUBLIC_BASE_URL: str = os.getenv("RESMARA_PUBLIC_BASE_URL", "https://sport.taila73942.ts.net/resmara")
+    # Hosts that inject their own public origin need no configuration at all: Render sets
+    # RENDER_EXTERNAL_URL, Railway RAILWAY_PUBLIC_DOMAIN. A reverse-proxied box sets the var.
+    PUBLIC_BASE_URL: str = (
+        os.getenv("RESMARA_PUBLIC_BASE_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or (os.getenv("RAILWAY_PUBLIC_DOMAIN") and "https://" + os.getenv("RAILWAY_PUBLIC_DOMAIN"))
+        or "https://sport.taila73942.ts.net/resmara"
+    ).rstrip("/")
 
     # Graph API. Base is overridable so tests can point at a local mock server.
     META_API_VERSION: str = os.getenv("META_API_VERSION", "v19.0")
@@ -53,7 +60,7 @@ class Settings(BaseSettings):
     META_CLIENT_SECRET: str = os.getenv("META_CLIENT_SECRET", "")
     # The app is mounted behind the router at /resmara/, so the callback must carry
     # that prefix or Meta's redirect 404s. Override with META_REDIRECT_URI for a real domain.
-    META_REDIRECT_URI: str = os.getenv("META_REDIRECT_URI", "https://sport.taila73942.ts.net/resmara/api/oauth/meta/callback")
+    META_REDIRECT_URI: str = os.getenv("META_REDIRECT_URI") or PUBLIC_BASE_URL + "/api/oauth/meta/callback"
     TIKTOK_CLIENT_ID: str = os.getenv("TIKTOK_CLIENT_ID", "")
     TIKTOK_CLIENT_SECRET: str = os.getenv("TIKTOK_CLIENT_SECRET", "")
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

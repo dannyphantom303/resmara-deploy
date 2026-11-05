@@ -23,6 +23,13 @@ _tmp = tempfile.NamedTemporaryFile(prefix="resmara-oauth-", suffix=".db", delete
 _tmp.close()
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 os.environ.pop("RESMARA_SIMULATE", None)
+# A Meta app this test owns: without an app id /connect answers 400 instead of handing back an
+# authorization URL, and a clean runner has no .env to borrow one from. The secret is a dummy -
+# the token exchange goes to the mock Graph below.
+os.environ["META_CLIENT_ID"] = "app_test_0000000000"
+os.environ["META_CLIENT_SECRET"] = "secret_test_0000000000"
+os.environ["META_SCOPES"] = "ads_management,business_management,pages_read_engagement,pages_show_list"
+os.environ.pop("META_REDIRECT_URI", None)
 
 # --- mock Graph API ---
 SHORT_TOKEN = "short-lived-from-code"
