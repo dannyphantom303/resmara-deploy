@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resmara — Operator Console</title>
+<style>
+:root{--ink:#102c40;--green:#143a50;--lime:#a2c9de;--paper:#f7fbff;--muted:#52778f;--line:#c7e2f2;--bad:#c0392b;--ok:#1f8a4c;--warn:#b7791f}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink)}
+a{color:#0b6fa4}
+header{position:sticky;top:0;z-index:20;background:var(--green);color:#fff;padding:10px 20px 0}
+header .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;letter-spacing:.2px}
+header .sp{flex:1}
+header .who{font-size:13px;opacity:.85}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35)}
+/* The whole console is one screen tall until you ask for more: sections fold away, and the
+   index stays visible so folding one in never loses your place. */
+nav{display:flex;gap:8px;align-items:center;overflow-x:auto;padding:9px 0;scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav a{color:#eaf6ff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 11px;font-size:12.5px;white-space:nowrap;text-decoration:none}
+nav a:hover{background:rgba(255,255,255,.24)}
+nav .grow{flex:1}
+main{max-width:1080px;margin:0 auto;padding:18px 20px 40px}
+.triage{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin-bottom:14px}
+.tile{background:#fff;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;font:inherit;color:inherit;cursor:pointer;box-shadow:0 1px 2px rgba(16,44,64,.05)}
+.tile:hover{border-color:var(--lime)}
+.tile .n{font-size:30px;font-weight:700;line-height:1.05}
+.tile .l{font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.tile .s{font-size:12px;color:var(--muted);margin-top:4px}
+.tile.on{border-left-color:var(--warn);background:#fffdf7}
+.tile.zero .n,.tile.zero .l{color:var(--muted);opacity:.75}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,44,64,.05)}
+.card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+.card h3{margin:18px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+.card h3:first-of-type{margin-top:4px}
+details.card{padding:0;overflow:hidden;scroll-margin-top:104px}
+details.card>summary{display:flex;align-items:center;gap:10px;padding:13px 18px;cursor:pointer;list-style:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary h2{margin:0;flex:0 0 auto}
+details.card>summary:hover{background:var(--paper)}
+.secsum{flex:1;text-align:right;font-size:12.5px;color:var(--muted)}
+.secsum b{color:var(--warn)}
+.chev{color:var(--muted);transition:transform .15s}
+details[open]>summary .chev{transform:rotate(90deg)}
+details.card>.body{padding:0 18px 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat .n{font-size:26px;font-weight:700;line-height:1.1}
+.stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stat .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.stat.wide .n{font-size:16px;font-weight:600}
+.rows div{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.rows div:last-child{border-bottom:0}
+.rows .k{flex:0 0 190px;color:var(--muted)}
+.rows .v{flex:1;word-break:break-word}
+.spark{display:flex;align-items:flex-end;gap:4px;height:60px;margin:6px 0 4px}
+.spark i{flex:1;background:var(--lime);border-radius:3px 3px 0 0;min-height:2px}
+.spark i:hover{background:var(--green)}
+.spark-axis{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.5px}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)}
+textarea{min-height:70px;resize:vertical}
+button{padding:10px 16px;border:0;border-radius:8px;background:var(--ink);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+button.tiny{padding:5px 10px;font-size:12.5px;font-weight:600}
+button:disabled{opacity:.55;cursor:default}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.scrollx{overflow-x:auto}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:var(--paper);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:#bfe3cd;background:#f0faf4}
+.pill.bad{color:var(--bad);border-color:#f0c9c4;background:#fdf2f0}
+.pill.warn{color:var(--warn);border-color:#f0e0bd;background:#fdf9ef}
+.pill.test{color:var(--muted);border-color:var(--line);background:#fff}
+.msg{margin-top:10px;font-size:13.5px}
+.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
+.hint{font-size:12.5px;color:var(--muted)}
+code{background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px}
+.hidden{display:none}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.row>div{flex:1;min-width:180px}
+/* Filters sit above the tables they narrow: one row of controls, so nobody scrolls to
+   change what a list is showing. */
+.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 10px}
+.chip{font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.chipbox{display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px;color:var(--muted);text-transform:none;letter-spacing:0;white-space:nowrap}
+.chipbox input{width:auto}
+.filters input[type=search]{max-width:260px;padding:6px 10px;font-size:13px}
+tr.testrow td{background:#fbfdff;color:#7c93a3}
+.thread{border-left:2px solid var(--line);margin:6px 0 10px;padding-left:10px}
+.thread .m{font-size:13px;margin-bottom:8px}
+.thread .m b{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.thread .m p{margin:2px 0 0;white-space:pre-wrap}
+.ticket-detail{background:var(--paper);border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Resmara — Operator Console</h1>
+    <span class="badge">admin</span>
+    <span id="statusPill"></span>
+    <span class="sp"></span>
+    <span class="who" id="stamp"></span>
+    <span class="who" id="who"></span>
+    <button class="ghost hidden" id="logout" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.5)">Sign out</button>
+  </div>
+  <nav id="index" class="hidden">
+    <a href="#sec-support" data-go="support">Support</a>
+    <a href="#sec-content" data-go="content">Content</a>
+    <a href="#sec-campaigns" data-go="campaigns">Campaigns</a>
+    <a href="#sec-users" data-go="users">Accounts</a>
+    <a href="#sec-advertising" data-go="advertising">Connections</a>
+    <a href="#sec-activity" data-go="activity">Activity</a>
+    <a href="#sec-health" data-go="health">Health</a>
+    <a href="#sec-checks" data-go="checks">Checks</a>
+    <span class="grow"></span>
+    <a href="#" id="collapseAll">Collapse all</a>
+    <a href="#" id="reloadAll">Refresh</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ── login ─────────────────────────────────────────────────────────── -->
+  <section id="loginCard" class="card" style="max-width:420px;margin:40px auto">
+    <h2>Sign in</h2>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" placeholder="you@example.com">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div style="margin-top:14px"><button id="loginBtn">Sign in</button></div>
+    <div class="msg" id="loginMsg"></div>
+    <p class="hint" style="margin:12px 0 0">Operators only. <a href="docs">Raw API (Swagger)</a></p>
+  </section>
+
+  <!-- ── console ───────────────────────────────────────────────────────── -->
+  <div id="console" class="hidden">
+    <!-- What is actually waiting on a human, above the fold, before any list. -->
+    <div class="triage" id="triage"></div>
+
+    <details class="card sec" data-sec="support" id="sec-support">
+      <summary><h2>Support</h2><span class="secsum" id="sum-support">…</span><span class="chev">›</span></summary>
+      <div class="body">
+        <p class="hint" style="margin-top:0">Reply or change status — the client sees it on their Support page.</p>
+        <div class="filters">
+          <button class="chip" data-filter="waiting" aria-pressed="true">Waiting on us</button>
+          <button class="chip" data-filter="all" aria-pressed="false">All</button>
+          <button class="chip" data-filter="open" aria-pressed="false">Open</button>
+          <button class="chip" data-filter="resolved" aria-pressed="false">Resolved</button>
+          <label class="chipbox"><input type="checkbox" id="showTestTickets"> Show <span id="testTicketCount">0</span> test ticket(s)</label>
+        </div>
+        <div class="scrollx"><table id="ticketsTable"><thead><tr><th>id</th><th>client</th><th>subject</th><th>status</th><th>raised</th><th>updated</th><th>whose turn</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="hint" id="ticketCount" style="margin-top:6px"></div>
+        <div class="msg" id="ticketMsg"></div>
+      </div>
+    </details>
+
+    <div id="metricsBody">
+    <details class="card sec" data-sec="content" id="sec-content">
+      <summary><h2>Content</h2><span class="secsum" id="sum-content">…</span><span class="chev">›</span></summary>
+      <div class="body" id="contentBody"></div>
+    </details>
+
+    <details class="card sec" data-sec="campaigns" id="sec-campaigns">
+      <summary><h2>Campaigns</h2><span class="secsum" id="sum-campaigns">…</span><span class="chev">›</span></summary>
+      <div class="body" id="campaignsBody"></div>
+    </details>
+
+    <details class="card sec" data-sec="users" id="sec-users">
+      <summary><h2>Accounts</h2><span class="secsum" id="sum-users">…</span><span class="chev">›</span></summary>
+      <div class="body">
+        <div class="filters">
+          <input id="userSearch" type="search" placeholder="Search email, name or id">
+          <label class="chipbox"><input type="checkbox" id="showTestUsers"> Show <span id="testUserCount">0</span> test account(s)</label>
+          <label class="chipbox"><input type="checkbox" id="showAllUsers"> Show every match</label>
+          <span class="hint" id="userCount"></span>
+        </div>
+        <div class="scrollx"><table id="usersTable"><thead><tr><th>id</th><th>email</th><th>name</th><th>active</th><th>plan</th><th>campaigns</th><th>last login</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </details>
+
+    <details class="card sec" data-sec="advertising" id="sec-advertising">
+      <summary><h2>Connections</h2><span class="secsum" id="sum-advertising">…</span><span class="chev">›</span></summary>
+      <div class="body" id="advertisingBody"></div>
+    </details>
+
+    <details class="card sec" data-sec="activity" id="sec-activity">
+      <summary><h2>Activity</h2><span class="secsum" id="sum-activity">…</span><span class="chev">›</span></summary>
+      <div class="body" id="activityBody"></div>
+    </details>
+
+    </div>
+
+    <details class="card sec" data-sec="health" id="sec-health">
+      <summary><h2>System health</h2><span class="secsum" id="sum-health">…</span><span class="chev">›</span></summary>
+      <div class="body">
+        <div class="rows" id="healthRows"></div>
+        <div class="hint" id="healthNote" style="margin-top:10px"></div>
+      </div>
+    </details>
+
+    <details class="card sec" data-sec="checks" id="sec-checks">
+      <summary><h2>Quick checks</h2><span class="secsum">look up a campaign and its posts</span><span class="chev">›</span></summary>
+      <div class="body">
+        <div class="row">
+          <div><label for="boostId">Campaign id</label><input id="boostId" placeholder="e.g. 1"></div>
+          <div style="flex:0 0 auto"><button class="ghost" id="checkBoost">Fetch campaign + posts</button></div>
+        </div>
+        <pre id="boostOut" class="hint" style="white-space:pre-wrap;max-height:260px;overflow:auto"></pre>
+      </div>
+    </details>
+
+    <details class="card sec" data-sec="notes" id="sec-notes">
+      <summary><h2>Notes</h2><span class="secsum">what is measured, and what is not</span><span class="chev">›</span></summary>
+      <div class="body">
+        <div id="unavailable"></div>
+        <p class="hint" style="margin-bottom:0">
+          Test rows are what our own suites create — accounts at <code>example.com</code>, their tickets,
+          campaigns, posts and simulated ad accounts. They are counted in every total (nothing is hidden
+          from the database) but listed last and folded away by default, and each section says how many it
+          is holding back. Health holds no product counts and metrics hold no service state, so no figure is
+          printed twice. API base is relative to this page, so this console works both on
+          <code>127.0.0.1:8083</code> and behind the Command Center at <code>/resmara/</code>.
+        </p>
+      </div>
+    </details>
+  </div>
+</main>
+
+<script>
+const TOKEN_KEY = 'resmara_admin_token';
+const OPEN_KEY = 'resmara_admin_open';   // which sections this operator keeps unfolded
+const $ = (id) => document.getElementById(id);
+
+function base(){ // works at "/" and behind "/resmara/"
+  return new URL('.', location.href).pathname.replace(/\/$/, '');
+}
+async function api(path, opts = {}) {
+  const t = localStorage.getItem(TOKEN_KEY);
+  const headers = Object.assign({}, opts.headers || {});
+  if (t) headers['Authorization'] = 'Bearer ' + t;
+  if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof URLSearchParams) && !(opts.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    opts = Object.assign({}, opts, { body: JSON.stringify(opts.body) });
+  }
+  const res = await fetch(base() + path, Object.assign({}, opts, { headers }));
+  const text = await res.text();
+  let body; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  if (!res.ok) {
+    const err = new Error((body && body.detail) ? JSON.stringify(body.detail) : ('HTTP ' + res.status));
+    err.status = res.status; throw err;
+  }
+  return body;
+}
+
+async function login(e) {
+  e.preventDefault();
+  const msg = $('loginMsg'); msg.className = 'msg'; msg.textContent = 'Signing in…';
+  try {
+    const form = new URLSearchParams();
+    form.set('username', $('email').value.trim());
+    form.set('password', $('password').value);
+    const res = await fetch(base() + '/api/auth/login', {
+      method: 'POST', body: form,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : 'Login failed (' + res.status + ')');
+    localStorage.setItem(TOKEN_KEY, body.access_token);
+    msg.className = 'msg ok'; msg.textContent = 'Signed in.';
+    await boot();
+  } catch (err) {
+    msg.className = 'msg bad'; msg.textContent = err.status === 401 ? 'Wrong email or password.' : ('Login failed: ' + err.message);
+  }
+}
+
+// Escaped here as well as at the call site: dates are meant to be inert text, and a
+// formatter that can emit markup is exactly how an API value becomes an XSS.
+function fmt(dt){ return esc(dt ? String(dt).replace('T',' ').slice(0,16) : '—'); }
+// values below come from our own API but are still user-supplied (email, name, subject)
+// strings; escape them before interpolation so a crafted name cannot inject markup.
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Everything below interpolates API values through esc() (or through fmt(), which escapes)
+// before it reaches innerHTML, so a crafted name, subject or reply cannot inject markup.
+function stat(n, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (n === null || n === undefined ? '—' : esc(n)) + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>'; }
+// For tiles whose value is already safe HTML built by pills() (each value escaped there):
+// escaping the whole thing again would print the markup instead of the pills.
+function statRaw(html, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (html || '—') + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>'; }
+function kv(k, v, cls){ return '<div><span class="k">' + esc(k) + '</span><span class="v ' + (cls||'') + '">' + v + '</span></div>'; }
+function pills(obj){
+  const parts = Object.entries(obj || {}).map(([k,v]) => '<span class="pill">' + esc(k) + ' ' + esc(v) + '</span>');
+  return parts.length ? parts.join(' ') : '<span class="pill">none yet</span>';
+}
+function modePill(mode){
+  const cls = mode === 'live' ? 'ok' : 'warn';
+  return '<span class="pill ' + cls + '">' + esc(mode) + '</span>';
+}
+// "4 real · 71 test" - a real number is never shown without the test rows it was counted
+// beside, and a split of zero is left out rather than printed as noise.
+function split(real, test, label){ return esc(real) + ' ' + esc(label) + (test ? ' <span class="hint">· ' + esc(test) + ' test</span>' : ''); }
+
+// ── triage: what is waiting on a human, before any list ───────────────────────────
+function pending(m){
+  const s = m.support || {}, c = m.campaigns || {}, ct = m.content || {}, a = m.advertising || {};
+  const waiting = (s.waiting_on_us || 0) - (s.waiting_on_us_test || 0);
+  const hidden  = s.waiting_on_us_test || 0;
+  // Each tile shows the work a human owes, with the test share named beside it rather than
+  // added into the number: a test run's ticket is not a client waiting on an answer.
+  return {
+    support: { n: waiting, hidden },
+    content: { n: (ct.due_now || 0) - (ct.due_now_test || 0) + (ct.failed || 0) - (ct.failed_test || 0),
+      hidden: (ct.due_now_test || 0) + (ct.failed_test || 0) },
+    campaigns: { n: (c.awaiting_build || 0) - (c.awaiting_build_test || 0), hidden: c.awaiting_build_test || 0 },
+    advertising: { n: a.needs_reconnect || 0, hidden: 0 },
+  };
+}
+function renderTriage(m){
+  const p = pending(m);
+  const tiles = [
+    ['support', 'Waiting on us', p.support, 'Reply to a client'],
+    ['content', 'Posts need us', p.content, 'Due for the publisher, or failed'],
+    ['campaigns', 'Awaiting build', p.campaigns, 'No plan generated yet'],
+    ['advertising', 'Reconnect', p.advertising, 'Tokens Meta has rejected'],
+  ];
+  $('triage').innerHTML = tiles.map(([sec, label, d, note]) =>
+    '<button class="tile ' + (d.n ? 'on' : 'zero') + '" data-go="' + sec + '">' +
+      '<div class="n">' + esc(d.n) + '</div><div class="l">' + esc(label) + '</div>' +
+      '<div class="s">' + esc(d.n ? note : 'nothing waiting') + (d.hidden ? ' · ' + esc(d.hidden) + ' test hidden' : '') + '</div>' +
+    '</button>').join('');
+}
+
+// ── section summaries (read while folded) ─────────────────────────────────────────
+function renderSums(m){
+  const s = m.support || {}, c = m.campaigns || {}, ct = m.content || {}, a = m.advertising || {}, act = m.activity || {};
+  const wait = (s.waiting_on_us || 0) - (s.waiting_on_us_test || 0);
+  $('sum-support').innerHTML = wait ? '<b>' + esc(wait) + ' waiting on us</b> · ' + esc(s.open || 0) + ' open' : esc(s.open || 0) + ' open · nothing waiting';
+  $('sum-content').innerHTML = split(ct.real_posts || 0, ct.test_posts || 0, 'real posts') + ' · ' +
+    esc((ct.due_now || 0) - (ct.due_now_test || 0)) + ' due now · ' + esc(ct.published || 0) + ' published';
+  $('sum-campaigns').innerHTML = split(c.real || 0, c.test_campaigns || 0, 'real') + ' · ' +
+    esc((c.awaiting_build || 0) - (c.awaiting_build_test || 0)) + ' awaiting build';
+  $('sum-users').innerHTML = split(m.users ? m.users.real || 0 : 0, m.users ? m.users.test_accounts || 0 : 0, 'real account(s)');
+  $('sum-advertising').innerHTML = esc(a.accounts || 0) + ' account(s) · ' + esc(a.live_accounts || 0) + ' live token(s)' +
+    (a.needs_reconnect ? ' · <b>' + esc(a.needs_reconnect) + ' need reconnect</b>' : '');
+  $('sum-activity').innerHTML = esc(act.total_14d || 0) + ' event(s) in ' + esc(act.days || 14) + ' days';
+}
+
+async function loadHealth(){
+  try {
+    const h = await api('/api/admin/health');
+    const okPill = h.status === 'healthy' ? '<span class="pill ok">healthy</span>' : '<span class="pill bad">' + esc(h.status) + '</span>';
+    $('healthRows').innerHTML =
+      kv('status', okPill) +
+      kv('database', h.db_ok ? '<span class="pill ok">reachable</span>' : '<span class="pill bad">down</span>') +
+      kv('version', esc(h.version) + ' <span class="hint">(' + esc(h.env) + ')</span>') +
+      kv('content generation', modePill(h.ai_mode) + ' <span class="hint">' + esc(h.ai_note) + '</span>') +
+      kv('ad platform', modePill(h.platform_mode) + ' <span class="hint">' + esc(h.platform_note) + '</span>') +
+      kv('errors (last 24h)', esc(h.errors_24h) + (h.last_error_at ? ' <span class="hint">· last ' + fmt(h.last_error_at) + ' UTC</span>' : '')) +
+      kv('last campaign built', fmt(h.last_build_at) + ' <span class="hint">UTC</span>') +
+      kv('last campaign launched', fmt(h.last_launch_at) + ' <span class="hint">UTC</span>') +
+      kv('checked', fmt(h.checked_at) + ' <span class="hint">UTC</span>');
+    $('healthNote').textContent = '';
+    $('statusPill').innerHTML = okPill;
+    $('sum-health').innerHTML = okPill + ' · v' + esc(h.version) + ' · ' +
+      (h.errors_24h ? '<b>' + esc(h.errors_24h) + ' error(s) today</b>' : 'no errors today');
+  } catch (err) {
+    $('healthRows').innerHTML = '';
+    $('healthNote').innerHTML = '<span class="msg bad">health: ' + esc(err.message) + (err.status === 403 ? ' — this account is not an admin.' : '') + '</span>';
+    $('sum-health').innerHTML = '<b>unavailable</b>';
+  }
+}
+
+function sparkline(days){
+  if (!days || !days.length) return '<div class="hint">No events recorded yet.</div>';
+  const max = Math.max(1, ...days.map(d => d.events));
+  return '<div class="spark">' + days.map(d =>
+      '<i style="height:' + Math.round((d.events / max) * 100) + '%" title="' + esc(d.date) + ': ' + esc(d.events) + ' event(s)"></i>').join('') +
+    '</div><div class="spark-axis"><span>' + esc(days[0].date) + '</span><span>' + esc(days[days.length-1].date) + '</span></div>';
+}
+
+let lastMetrics = null;
+async function loadMetrics(){
+  try {
+    const m = await api('/api/admin/metrics');
+    lastMetrics = m;
+    const u = m.users || {}, c = m.campaigns || {}, ct = m.content || {}, s = m.support || {},
+          a = m.advertising || {}, act = m.activity || {}, h = m.unavailable || [];
+    $('testUserCount').textContent = u.test_accounts || 0;
+    $('testTicketCount').textContent = s.test_tickets || 0;
+    openFromWork(m);
+
+    $('campaignsBody').innerHTML =
+      '<div class="grid">' +
+        stat(u.total, 'accounts', '', u.test_accounts ? u.real + ' real · ' + u.test_accounts + ' test' : '') +
+        stat(c.total, 'campaigns', '', c.test_campaigns ? c.real + ' real · ' + c.test_campaigns + ' test' : '') +
+        stat(c.live, 'live') + stat(c.launched, 'launched') +
+        stat(c.awaiting_build, 'awaiting build', '', c.awaiting_build_test ? c.awaiting_build_test + ' of them test' : '') +
+        stat('$' + Number(c.budget_configured_usd || 0).toFixed(2), 'budget configured', 'wide') +
+        statRaw(pills(c.by_stage), 'by stage', 'wide') +
+      '</div>';
+
+    $('contentBody').innerHTML =
+      '<div class="grid">' +
+        stat(ct.posts_total, 'posts', '', ct.test_posts ? ct.real_posts + ' real · ' + ct.test_posts + ' test' : '') +
+        stat(ct.due_now, 'due for the publisher', '', ct.due_now_test ? ct.due_now_test + ' of them test' : '') +
+        stat(ct.awaiting_approval, 'awaiting approval') + stat(ct.approved, 'approved') +
+        stat(ct.scheduled, 'scheduled') + stat(ct.published, 'published') +
+        stat(ct.failed, 'publish failed', '', ct.failed_test ? ct.failed_test + ' of them test' : '') +
+        stat(fmt(ct.next_publish_at), 'next publish', 'wide') +
+        stat(ct.photos, 'photos', '', ct.photos_test ? ct.photos_test + ' test' : '') +
+        stat(ct.photos_tagged + ' tagged', 'of those') +
+        stat(ct.designs, 'designs') +
+      '</div>';
+
+    $('advertisingBody').innerHTML =
+      '<div class="grid">' +
+        stat(a.accounts, 'ad accounts') + stat(a.live_accounts, 'live tokens') +
+        stat(a.simulated, 'simulated') +
+        stat(a.needs_reconnect, 'need reconnect', '', a.expiring ? a.expiring + ' expiring soon' : '') +
+        stat('$' + Number(a.budget_configured_usd || 0).toFixed(2), 'budget configured', 'wide') +
+        statRaw(pills(a.by_token_status), 'token state (last sweep)', 'wide') +
+        statRaw(pills(a.platforms), 'platforms', 'wide') +
+      '</div><p class="hint">Token state is written by the health sweep, so this is the last thing we actually asked Meta — not a guess about whether a token still works.</p>';
+
+    $('activityBody').innerHTML =
+      '<h3>Last ' + esc(act.days || 14) + ' days (UTC)</h3>' + sparkline(act.per_day) +
+      '<div style="margin-top:6px">' + pills(act.by_type_14d) + '</div>' +
+      '<div class="hint" style="margin-top:6px">' + esc(act.total_14d || 0) + ' recorded event(s) in the window.</div>';
+
+    $('unavailable').innerHTML = h.length
+      ? '<h3>Not measured</h3>' + h.map(x => '<div class="hint">' + esc(x.metric) + ': ' + esc(x.reason) + '</div>').join('')
+      : '<div class="hint">Everything measured is above.</div>';
+
+    renderTriage(m);
+    renderSums(m);
+    renderTickets();
+    renderUsers();
+    $('stamp').textContent = 'refreshed ' + new Date().toISOString().slice(11,19) + ' UTC';
+  } catch (err) {
+    $('campaignsBody').innerHTML = '<div class="hint">metrics: ' + esc(err.message) + '</div>';
+    $('contentBody').innerHTML = '';
+    $('advertisingBody').innerHTML = '';
+    $('activityBody').innerHTML = '';
+  }
+}
+
+// ── accounts ──────────────────────────────────────────────────────────────────────
+let userRows = [];
+function renderUsers(){
+  const body = $('usersTable').querySelector('tbody');
+  const q = $('userSearch').value.trim().toLowerCase();
+  const showTest = $('showTestUsers').checked;
+  const showAll = $('showAllUsers').checked;
+  let rows = userRows.filter(u => showTest || !u.is_test);
+  if (q) rows = rows.filter(u => (u.email || '').toLowerCase().includes(q) ||
+    (u.name || '').toLowerCase().includes(q) || String(u.id) === q);
+  const total = rows.length;
+  if (!showAll) rows = rows.slice(0, 25);
+  body.innerHTML = rows.length ? rows.map(u =>
+    '<tr' + (u.is_test ? ' class="testrow"' : '') + '><td>' + u.id + '</td><td>' + esc(u.email) + (u.is_test ? ' <span class="pill test">test</span>' : '') + '</td><td>' + esc(u.name || '—') + '</td>' +
+    '<td>' + (u.is_active ? '<span class="pill ok">yes</span>' : '<span class="pill bad">no</span>') + '</td>' +
+    '<td><span class="pill ' + (u.subscription_status === 'active' ? 'ok' : 'warn') + '">' + esc(u.subscription_status) + '</span></td>' +
+    '<td>' + (u.campaign_count ?? 0) + '</td><td>' + fmt(u.last_login) + '</td></tr>').join('')
+    : '<tr><td colspan="7" class="hint">No account matches. Test accounts are hidden unless you ask for them.</td></tr>';
+  $('userCount').textContent = total + ' match(es)' + (rows.length < total ? ' · showing ' + rows.length : '') +
+    (showTest ? '' : ' · test accounts hidden');
+}
+async function loadUsers(){
+  try {
+    userRows = await api('/api/admin/users');
+    renderUsers();
+  } catch (err) {
+    $('usersTable').querySelector('tbody').innerHTML = '<tr><td colspan="7" class="msg bad">' + esc(err.message) + '</td></tr>';
+  }
+}
+
+// ── support ───────────────────────────────────────────────────────────────────────
+let ticketRows = [];
+let ticketFilter = 'waiting';
+function lastFrom(t){
+  const msgs = t.messages || [];
+  const last = msgs.length ? String((msgs[msgs.length-1] || {}).from || '') : '';
+  if (!last) return '<span class="pill">nobody</span>';
+  return String(last).toLowerCase() === 'admin'
+    ? '<span class="pill ok">client</span>' : '<span class="pill warn">us</span>';
+}
+function isOpen(t){ return String(t.status || '') !== 'resolved' && String(t.status || '') !== 'closed'; }
+function waitingOnUs(t){ return isOpen(t) && lastFrom(t).includes('us'); }
+function thread(t){
+  const msgs = t.messages || [];
+  if (!msgs.length) return '<div class="hint">No messages on this ticket.</div>';
+  return '<div class="thread">' + msgs.map(m =>
+    '<div class="m"><b>' + esc(m.from || 'unknown') + '</b> <span class="hint">' + fmt(m.at) + '</span><p>' + esc(m.text || '') + '</p></div>').join('') + '</div>';
+}
+function ticketRow(t){
+  return '<tr' + (t.is_test ? ' class="testrow"' : '') + '><td>' + t.id + '</td><td>' + esc(t.client_email || ('user ' + t.user_id)) + (t.is_test ? ' <span class="pill test">test</span>' : '') + '</td><td>' + esc(t.subject) + '</td>' +
+    '<td><span class="pill ' + (isOpen(t) ? 'warn' : 'ok') + '">' + esc(t.status) + '</span></td>' +
+    '<td>' + fmt(t.created_at) + '</td><td>' + fmt(t.updated_at) + '</td><td>' + lastFrom(t) + '</td>' +
+    '<td><button class="ghost tiny" data-ticket="' + t.id + '">Open</button></td></tr>' +
+    '<tr class="ticket-detail hidden" id="ticket-' + t.id + '"><td colspan="8">' + thread(t) +
+      '<div class="row" style="align-items:flex-end">' +
+        '<div style="flex:0 0 190px"><label for="status-' + t.id + '">Status</label>' +
+          '<select id="status-' + t.id + '">' + ['open','in_progress','resolved','closed'].map(v =>
+            '<option value="' + v + '"' + (t.status === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div>' +
+        '<div><label for="reply-' + t.id + '">Reply to the client</label>' +
+          '<textarea id="reply-' + t.id + '" placeholder="Type the answer the client will read on their Support page…"></textarea></div>' +
+      '</div>' +
+      '<div style="margin-top:10px"><button class="tiny" data-save="' + t.id + '">Save</button> ' +
+      '<button class="ghost tiny" data-close="' + t.id + '">Cancel</button></div>' +
+    '</td></tr>';
+}
+function renderTickets(){
+  const body = $('ticketsTable').querySelector('tbody');
+  const showTest = $('showTestTickets').checked;
+  let rows = ticketRows.filter(t => showTest || !t.is_test);
+  if (ticketFilter === 'waiting') rows = rows.filter(waitingOnUs);
+  else if (ticketFilter === 'open') rows = rows.filter(isOpen);
+  else if (ticketFilter === 'resolved') rows = rows.filter(t => !isOpen(t));
+  body.innerHTML = rows.length ? rows.map(ticketRow).join('')
+    : '<tr><td colspan="8" class="hint">Nothing here. ' +
+      (ticketFilter === 'waiting' ? 'No client is waiting on us. ' : '') +
+      (showTest ? '' : 'Test tickets are hidden unless you ask for them.') + '</td></tr>';
+  const shown = rows.filter(t => !t.is_test).length;
+  $('ticketCount').textContent = rows.length + ' row(s) · ' + shown + ' real' +
+    (showTest ? '' : ' · ' + ticketRows.filter(t => t.is_test).length + ' test hidden');
+}
+async function loadTickets(){
+  try {
+    ticketRows = await api('/api/admin/support');
+    renderTickets();
+  } catch (err) { $('ticketsTable').querySelector('tbody').innerHTML = '<tr><td colspan="8" class="msg bad">' + esc(err.message) + '</td></tr>'; }
+}
+async function saveTicket(id){
+  const status = $('status-' + id).value;
+  const reply = $('reply-' + id).value.trim();
+  const msg = $('ticketMsg'); msg.className = 'msg'; msg.textContent = 'Saving…';
+  const params = new URLSearchParams(); params.set('status', status);
+  if (reply) params.set('reply', reply);
+  try {
+    await api('/api/admin/support/' + encodeURIComponent(id) + '?' + params.toString(), { method: 'PATCH' });
+    msg.className = 'msg ok'; msg.textContent = 'Ticket ' + id + ' saved' + (reply ? ' and the reply is visible to the client.' : '.');
+    await loadTickets(); loadMetrics();
+  } catch (err) { msg.className = 'msg bad'; msg.textContent = 'Could not save ticket ' + id + ': ' + err.message; }
+}
+async function checkBoost(){
+  const id = $('boostId').value.trim(); if (!id) return;
+  try {
+    const b = await api('/api/boosts/' + encodeURIComponent(id));
+    const posts = await api('/api/posts/' + encodeURIComponent(id)).catch(() => []);
+    $('boostOut').textContent = JSON.stringify({ boost: b, posts: posts.length, approved: posts.filter(p => p.client_status === 'approved').length }, null, 2);
+  } catch (err) { $('boostOut').textContent = 'error: ' + err.message; }
+}
+
+// ── folding: remember what this operator keeps open ───────────────────────────────
+function savedOpen(){ try { return JSON.parse(localStorage.getItem(OPEN_KEY) || '{}'); } catch { return {}; } }
+function setOpen(sec, open){
+  const s = savedOpen(); s[sec] = !!open;
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify(s)); } catch { /* private mode: folding still works */ }
+}
+function openSection(sec){
+  const d = $('sec-' + sec); if (!d) return;
+  d.open = true; setOpen(sec, true);
+  d.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+// Sections with real work in them open themselves the first time this browser sees the
+// console; after that the operator's own choice wins.
+function openFromWork(m){
+  if (openFromWork.done) return;
+  openFromWork.done = true;
+  const p = pending(m), saved = savedOpen();
+  document.querySelectorAll('details.sec').forEach(d => {
+    const sec = d.dataset.sec;
+    d.open = sec in saved ? !!saved[sec] : !!((p[sec] || {}).n);
+  });
+}
+
+document.querySelectorAll('details.sec > summary').forEach(sm =>
+  sm.addEventListener('click', () => { const d = sm.parentElement; setOpen(d.dataset.sec, !d.open); }));
+document.querySelectorAll('[data-go]').forEach(el =>
+  el.addEventListener('click', (e) => { e.preventDefault(); openSection(el.dataset.go); }));
+$('collapseAll').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('details.sec').forEach(d => { d.open = false; setOpen(d.dataset.sec, false); });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+$('reloadAll').addEventListener('click', (e) => { e.preventDefault(); refreshAll(); });
+$('triage').addEventListener('click', (e) => { const t = e.target.closest('[data-go]'); if (t) openSection(t.dataset.go); });
+['userSearch','showTestUsers','showAllUsers'].forEach(id => $(id).addEventListener('input', renderUsers));
+$('showTestTickets').addEventListener('change', renderTickets);
+document.querySelectorAll('.filters .chip').forEach(chip => chip.addEventListener('click', () => {
+  document.querySelectorAll('.filters .chip').forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
+  ticketFilter = chip.dataset.filter; renderTickets();
+}));
+
+async function boot(){
+  let me;
+  try { me = await api('/api/auth/me'); }
+  catch { localStorage.removeItem(TOKEN_KEY); return; }
+  $('loginCard').classList.add('hidden');
+  $('console').classList.remove('hidden');
+  $('index').classList.remove('hidden');
+  $('logout').classList.remove('hidden');
+  $('who').textContent = me.email + (me.is_admin ? ' · admin' : ' · NOT admin');
+  refreshAll();
+}
+
+function refreshAll(){ loadHealth(); loadMetrics(); loadUsers(); loadTickets(); }
+
+$('loginBtn').addEventListener('click', login);
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(e); });
+$('logout').addEventListener('click', () => { localStorage.removeItem(TOKEN_KEY); location.reload(); });
+$('checkBoost').addEventListener('click', checkBoost);
+document.addEventListener('click', (e) => {
+  const open = e.target.closest('[data-ticket]');
+  if (open) { $('ticket-' + open.dataset.ticket).classList.toggle('hidden'); return; }
+  const save = e.target.closest('[data-save]');
+  if (save) { saveTicket(save.dataset.save); return; }
+  const close = e.target.closest('[data-close]');
+  if (close) { $('ticket-' + close.dataset.close).classList.add('hidden'); }
+});
+// The numbers are counts of live rows, so they move while the console is open; refresh
+// them every minute while this tab is actually being looked at - but never on top of a
+// half-written reply.
+setInterval(() => {
+  if (document.hidden || $('console').classList.contains('hidden')) return;
+  if ([...document.querySelectorAll('.ticket-detail:not(.hidden) textarea')].some(t => t.value.trim())) return;
+  refreshAll();
+}, 60000);
+boot();
+</script>
+</body>
+</html>

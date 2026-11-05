@@ -1,0 +1,23 @@
+# Secrets and local state — never commit or hand off.
+.env
+.env.local
+*.pem
+resmara.db
+*.db
+*.sqlite3
+
+# Uploaded listing media (client photos/videos) stays on the server.
+uploads/
+
+# Local runtime + this machine's verify recipe (absolute local paths)
+.hermes/
+.pytest_cache/
+# matched without the trailing slash: the venv here is a symlink to another project's,
+# and git stages a symlink as a file, so `venv/` alone would commit it.
+venv
+.venv
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

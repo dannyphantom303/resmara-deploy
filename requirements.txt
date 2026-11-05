@@ -1,0 +1,25 @@
+# Resmara — pinned runtime dependencies.
+# Versions are the ones this app is verified against locally; install with
+#   pip install -r requirements.txt
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+starlette==1.6.0
+SQLAlchemy==2.0.52
+httpx==0.28.1
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==5.0.0
+cryptography==50.0.1
+python-dotenv==1.2.3
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-multipart==0.0.32
+email-validator==2.3.0
+
+# Postgres driver — only needed when DATABASE_URL points at Postgres (the default in
+# docker-compose.yml). Safe to leave installed with the sqlite default. Kept as a floor
+# rather than an exact pin: the binary wheels lag new Python releases by a version or two.
+psycopg[binary]>=3.2.10
+
+# Not required by the app itself; used by tests/ and by the health sweep script.
+requests>=2.32.3

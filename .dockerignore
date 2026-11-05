@@ -1,0 +1,16 @@
+# Never build these into the image.
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+resmara.db
+*.db
+*.sqlite3
+uploads/
+__pycache__/
+**/__pycache__/
+*.pyc
+.git/
+.gitignore
+.DS_Store

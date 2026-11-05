@@ -1,0 +1,49 @@
+# Resmara — one-command deployment: Postgres + the app behind a named uploads volume.
+#
+#   cp .env.example .env      # then fill in SECRET_KEY, RESMARA_TOKEN_KEY, Meta ids, domain
+#   docker compose up -d --build
+#   docker compose logs -f app      # watch the startup migration line
+#
+# The app is then on http://<host>:8000/ — put TLS in front of it (Caddy, nginx, Cloudflare,
+# or the platform's load balancer) and point RESMARA_PUBLIC_BASE_URL / META_REDIRECT_URI at
+# that https URL, because Meta and Instagram will fetch this host by name.
+#
+# Scheduled work is NOT in this file on purpose: the publisher and the token-health sweep are
+# driven by an external scheduler calling the app's token-protected endpoints. See DEPLOY.md
+# ("Scheduled jobs"), or add a cron container here later.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: resmara
+      POSTGRES_PASSWORD: change-me-db-password
+      POSTGRES_DB: resmara
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resmara -d resmara"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides whatever DATABASE_URL is in .env so the compose service name wins.
+      DATABASE_URL: postgresql+psycopg://resmara:change-me-db-password@db:5432/resmara
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Uploaded listing photos/videos: MUST persist — Instagram pulls media from the public
+      # URL of this directory, and the tokens/media pair must survive a redeploy.
+      - uploads:/app/uploads
+
+volumes:
+  pgdata:
+  uploads:
