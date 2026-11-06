@@ -34,7 +34,17 @@ ADDITIONS = {
         ("reach", "INTEGER"),
         ("last_error", "TEXT"),
     ],
+    # Listing photos live in the row, not only on disk: a free-tier instance has no volume,
+    # so every deploy and every idle restart wipes uploads/ and leaves image_url pointing at
+    # a 404. Bytes are stored next to the asset so the photo survives a restart.
+    "assets": [
+        ("data", "BYTEA"),
+        ("content_type", "VARCHAR"),
+    ],
 }
+
+# SQLite has no BYTEA.
+_DIALECT_TYPES = {("assets", "data"): {"postgresql": "BYTEA", "sqlite": "BLOB"}}
 
 
 def encrypt_stored_tokens() -> int:
@@ -79,6 +89,9 @@ def migrate() -> list[str]:
             have = {c["name"] for c in insp.get_columns(table)}
             for name, ddl in cols:
                 if name not in have:
+                    per_dialect = _DIALECT_TYPES.get((table, name))
+                    if per_dialect:
+                        ddl = per_dialect.get(engine.dialect.name, ddl)
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
                     added.append(f"{table}.{name}")
     return added

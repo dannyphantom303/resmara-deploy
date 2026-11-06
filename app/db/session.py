@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func, JSON, LargeBinary
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from app.db.urls import normalize_database_url
@@ -178,6 +178,10 @@ class Asset(Base):
     see = Column(Text, nullable=True)              # what is visible
     story = Column(Text, nullable=True)            # the STORY detail the caption is built from
     tags = Column(JSON, default=[])                # POST, ROOM, FEATURE, SCALE, SOCIAL, WHY
+    # The image itself. A free-tier container has no persistent disk, so a photo that lives
+    # only in uploads/ becomes a 404 at the next deploy; the bytes ride along in the row.
+    data = Column(LargeBinary, nullable=True)
+    content_type = Column(String, nullable=True)
     tagged_by = Column(String, default="none")     # none | ai | human
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

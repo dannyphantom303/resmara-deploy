@@ -172,6 +172,22 @@ def main() -> int:
         count = SessionLocal().query(Asset).filter(Asset.boost_id == boost_id).count()
         check("nothing extra was written to the gallery", count == 2, str(count))
 
+        # --- the photo must survive a deploy ----------------------------------------------
+        # A hosted instance restarts with an empty uploads/, so the disk copy cannot be the
+        # only copy: the served URL has to keep working.
+        served = client.get(listed[0]["url"])
+        check("a stored photo is served from disk", served.status_code == 200 and served.content, str(served.status_code))
+        for path in uploads.glob("*"):
+            path.unlink()
+        after_wipe = client.get(listed[0]["url"])
+        check("and still served after uploads/ is wiped",
+              after_wipe.status_code == 200 and after_wipe.content == jpeg or after_wipe.content == png,
+              f"{after_wipe.status_code} {len(after_wipe.content)}b")
+        check("with the right content type", after_wipe.headers.get("content-type", "").startswith("image/"),
+              str(after_wipe.headers.get("content-type")))
+        missing = client.get("/uploads/does-not-exist.jpg")
+        check("an unknown file is still a 404", missing.status_code == 404, str(missing.status_code))
+
     # --- a plan that names no photo must still fill the calendar ---------------------------
     from app.services.content_engine import post_image_urls
 

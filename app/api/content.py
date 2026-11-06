@@ -66,8 +66,19 @@ async def upload_photo(file: UploadFile = File(...), boost_id: int = Form(None),
     if boost_id is not None:
         _owned_boost(boost_id, current_user, db)
     filename, url, size = _save_upload(file)
+    # Keep the bytes with the row as well: uploads/ is lost on the next deploy of a
+    # free-tier instance, and a photo post then renders a broken image.
+    blob = None
+    ctype = file.content_type if (file.content_type or "").startswith("image/") else None
+    if ctype:
+        try:
+            with open(os.path.join(UPLOAD_DIR, filename), "rb") as fh:
+                blob = fh.read()
+        except OSError:
+            blob = None
     asset = Asset(user_id=current_user.id, boost_id=boost_id, filename=filename, url=url,
-                  original_name=os.path.basename(file.filename or ""), kind=kind)
+                  original_name=os.path.basename(file.filename or ""), kind=kind,
+                  data=blob, content_type=ctype)
     db.add(asset)
     db.commit()
     db.refresh(asset)

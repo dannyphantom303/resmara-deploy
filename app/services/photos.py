@@ -276,6 +276,8 @@ async def import_from_urls(
                 url=f"/uploads/{filename}",
                 original_name=name,
                 kind="photo",
+                data=data,
+                content_type=content_type or None,
             )
             db.add(asset)
             db.commit()
