@@ -370,7 +370,18 @@ def _image_content_url(asset, root: str) -> str:
                     mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
                     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
         except OSError:
-            pass  # fall through to the URL form
+            pass  # fall through to the stored copy, then to the URL form
+    # A hosted instance starts with an empty uploads/, so the row's own bytes are the copy
+    # that is always there. Without this the vision model is handed a 404 and tags nothing.
+    stored = getattr(asset, "data", None)
+    if stored:
+        try:
+            raw = bytes(stored)
+            if raw and len(raw) <= 8 * 1024 * 1024:
+                mime = getattr(asset, "content_type", None) or "image/jpeg"
+                return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        except (TypeError, ValueError):
+            pass
     url = str(getattr(asset, "url", "") or "")
     if url.startswith("/") and root:
         return root + url

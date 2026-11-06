@@ -233,16 +233,15 @@ async def import_from_urls(
     skipped: list[dict] = []
     seen_urls: set[str] = set()
     try:
-        existing = {
-            (a.original_name or "").lower()
-            for a in db.query(Asset).filter(Asset.boost_id == boost_id).all()
-        } if boost_id is not None else set()
+        rows = db.query(Asset).filter(Asset.boost_id == boost_id).all() if boost_id is not None else []
+        existing = {(a.original_name or "").lower(): a for a in rows}
         for url in urls:
             if len(imported) >= max(1, int(limit)):
                 break
             if url in seen_urls:
                 continue
             seen_urls.add(url)
+
             try:
                 resp = await client.get(url, headers={"Accept": "image/*"})
                 resp.raise_for_status()
@@ -264,7 +263,17 @@ async def import_from_urls(
 
             name = source_name(url, ext)
             if name.lower() in existing:
-                skipped.append({"url": url, "reason": "already imported"})
+                # Same photo as before. If its bytes were lost (an asset imported before images
+                # were stored with the row, or a wiped disk), this is the chance to repair it.
+                old = existing[name.lower()]
+                if not getattr(old, "data", None):
+                    old.data = data
+                    old.content_type = content_type or None
+                    db.commit()
+                    imported.append({"asset_id": old.id, "url": old.url, "name": name,
+                                     "bytes": len(data), "restored": True})
+                else:
+                    skipped.append({"url": url, "reason": "already imported"})
                 continue
             filename = f"{uuid.uuid4().hex}{ext}"
             with open(os.path.join(upload_dir, filename), "wb") as fh:
@@ -282,7 +291,7 @@ async def import_from_urls(
             db.add(asset)
             db.commit()
             db.refresh(asset)
-            existing.add(name.lower())
+            existing[name.lower()] = asset
             imported.append({"asset_id": asset.id, "url": asset.url, "name": name, "bytes": len(data)})
     finally:
         if own:
