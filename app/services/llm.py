@@ -81,6 +81,11 @@ DEFAULT_HOSTED_TIMEOUT = 180.0
 # thousands of tokens, which reads as a hang. 0 disables the cap.
 ENGINE_MAX_TOKENS_ENV = "RESMARA_ENGINE_MAX_TOKENS"
 DEFAULT_LOCAL_MAX_TOKENS = 8192
+# A hosted reasoning model on a compatible endpoint spends the budget on its trace before it
+# writes a single character of `content`. Measured on ollama.com 2026-11-06: the 14-day plan
+# (asked for 40k) came back with content="" and finish_reason="length" at an 8k cap, while the
+# same call returned the full plan at 32k. Small models keep the old, cheap cap.
+DEFAULT_COMPAT_MAX_TOKENS = 32000
 
 
 def default_timeout() -> float:
@@ -158,9 +163,11 @@ def _for_provider(payload: dict) -> dict:
         num_ctx = int(os.getenv(ENGINE_NUM_CTX_ENV) or DEFAULT_LOCAL_NUM_CTX)
         sent["options"] = {**(sent.get("options") or {}), "num_ctx": num_ctx}
     try:
-        cap = int(os.getenv(ENGINE_MAX_TOKENS_ENV) or DEFAULT_LOCAL_MAX_TOKENS)
+        cap = int(os.getenv(ENGINE_MAX_TOKENS_ENV) or 0) or (
+            DEFAULT_LOCAL_MAX_TOKENS if is_local_base() else DEFAULT_COMPAT_MAX_TOKENS
+        )
     except ValueError:
-        cap = DEFAULT_LOCAL_MAX_TOKENS
+        cap = DEFAULT_COMPAT_MAX_TOKENS
     if cap > 0:
         for key in ("max_tokens", "max_completion_tokens"):
             if isinstance(sent.get(key), int) and sent[key] > cap:
