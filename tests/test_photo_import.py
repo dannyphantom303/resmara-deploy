@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Listing photos must be able to reach a campaign.
+
+The calendar only shows an image when the engine's plan names an Asset that exists, so
+photo import is not a nicety: with an empty gallery every post is text. This pins the two
+halves — what counts as a listing photo on a page, and what gets stored — without touching
+the live internet (extraction is pure, downloads go through a mock transport).
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+FAILS = 0
+
+PAGE = """
+<html><head>
+<meta content="https://cdn.example.test/gallery/hero-front.jpg" property="og:image">
+<meta name="twitter:image" content="https://cdn.example.test/gallery/hero-front.jpg">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SingleFamilyResidence",
+ "image":["https://cdn.example.test/gallery/kitchen.jpg",
+          {"@type":"ImageObject","url":"https://cdn.example.test/gallery/living-room.webp"}]}
+</script>
+</head><body>
+<img src="/gallery/patio.png" alt="patio">
+<img data-src="https://cdn.example.test/gallery/master-bed.jpeg" alt="master">
+<img srcset="https://cdn.example.test/gallery/bath-small.jpg 480w, https://cdn.example.test/gallery/bath-large.jpg 1280w" alt="bath">
+<img src="https://cdn.example.test/brand/logo.svg" alt="logo">
+<img src="https://cdn.example.test/brand/agent-headshot.jpg" alt="agent">
+<img src="https://cdn.example.test/pixel?id=3" alt="">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="">
+</body></html>
+"""
+
+
+def check(label: str, ok: bool, detail: str = "") -> None:
+    global FAILS
+    print(("ok   " if ok else "FAIL ") + label + (f" — {detail}" if detail and not ok else ""))
+    if not ok:
+        FAILS += 1
+
+
+def main() -> int:
+    db = tempfile.mkdtemp(prefix="resmara_photo_import_")
+    uploads = Path(db) / "uploads"
+    os.environ["DATABASE_URL"] = f"sqlite:///{db}/app.db"
+    os.environ["UPLOAD_DIR"] = str(uploads)
+    for key in ("RESMARA_ENGINE_BASE_URL", "RESMARA_ENGINE_API_KEY", "OPENAI_API_KEY"):
+        os.environ.pop(key, None)
+    for mod in [m for m in list(sys.modules) if m.startswith("app.")]:
+        del sys.modules[mod]
+
+    import asyncio
+
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from app.core.config import settings
+    from app.main import app
+    from app.services import photos
+
+    # --- extraction is a pure function: no network, no model ------------------------------
+    urls = photos.extract_image_urls(PAGE, "https://listing.example.test/property/42", limit=10)
+    check("og:image comes first and wins", urls and urls[0].endswith("hero-front.jpg"), str(urls[:2]))
+    check("structured data is read", any("kitchen.jpg" in u for u in urls), str(urls))
+    check("a relative <img> becomes absolute",
+          "https://listing.example.test/gallery/patio.png" in urls, str(urls))
+    check("data-src lazy images count", any("master-bed.jpeg" in u for u in urls), str(urls))
+    check("srcset keeps the largest candidate",
+          any("bath-large.jpg" in u for u in urls) and not any("bath-small.jpg" in u for u in urls), str(urls))
+    check("logos, headshots and tracking pixels are dropped",
+          not any(x in " ".join(urls) for x in ("logo", "headshot", "pixel")), str(urls))
+    check("data: URIs are ignored", not any(u.startswith("data:") for u in urls), str(urls))
+    check("no duplicates survive", len(urls) == len(set(urls)), str(urls))
+    check("the limit is respected", len(photos.extract_image_urls(PAGE, "https://x.test", limit=2)) == 2)
+
+    # --- download + store, through a mock transport ---------------------------------------
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 2048
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 1024
+    files = {
+        "https://cdn.example.test/gallery/hero-front.jpg": (jpeg, "image/jpeg"),
+        "https://cdn.example.test/gallery/kitchen.jpg": (png, "image/png"),
+        "https://cdn.example.test/gallery/gone.jpg": (None, "text/html"),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body, ctype = files.get(str(request.url), (None, "text/html"))
+        if body is None:
+            return httpx.Response(404, text="not found")
+        return httpx.Response(200, content=body, headers={"content-type": ctype})
+
+    settings.SIMULATE = True
+    client_http = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+    with TestClient(app) as client:
+        reg = client.post("/api/auth/register", json={
+            "email": f"photos{abs(hash(db)) % 10**8}@example.com", "password": "photo-pass-12345", "name": "Photos"})
+        token = client.post("/api/auth/login", data={
+            "username": reg.json()["email"], "password": "photo-pass-12345"}).json()["access_token"]
+        h = {"Authorization": f"Bearer {token}"}
+        boost_id = client.post("/api/boosts", headers=h, json={
+            "address": "2163 Sycamore Dr, Redding, CA", "campaign_days": 14}).json()["id"]
+
+        from app.db.session import Asset, SessionLocal
+
+        db_session = SessionLocal()
+        try:
+            result = asyncio.run(photos.import_from_urls(
+                db_session, user_id=1, boost_id=boost_id,
+                urls=["https://cdn.example.test/gallery/hero-front.jpg",
+                      "https://cdn.example.test/gallery/kitchen.jpg",
+                      "https://cdn.example.test/gallery/gone.jpg"],
+                upload_dir=str(uploads), limit=10, client=client_http))
+        finally:
+            db_session.close()
+        asyncio.run(client_http.aclose())
+
+        check("both good photos import", result["imported"] == 2, str(result.get("skipped")))
+        check("the dead link is reported, not fatal",
+              any("gone.jpg" in s["url"] for s in result["skipped"]), str(result["skipped"]))
+        stored = list(uploads.glob("*"))
+        check("the bytes land in uploads/", len(stored) == 2, str([p.name for p in stored]))
+        check("the extension follows the real content type",
+              {p.suffix for p in stored} == {".jpg", ".png"}, str([p.suffix for p in stored]))
+
+        listed = client.get(f"/api/content/assets/{boost_id}", headers=h).json()
+        check("assets are readable over the API", len(listed) == 2, str(len(listed)))
+        check("each asset carries a /uploads URL",
+              all(a["url"].startswith("/uploads/") for a in listed), str([a["url"] for a in listed]))
+        check("the name is human-readable for the photo index",
+              any("hero-front" in (a.get("original_name") or "") for a in listed), str(listed))
+
+        index = client.get(f"/api/content/photo-index/{boost_id}", headers=h).json()
+        check("the engine's photo index sees them", index["assets"] == 2 and "hero-front" in index["photo_index"],
+              index["photo_index"][:120])
+
+        # Importing the same gallery twice must not double the gallery.
+        db_session = SessionLocal()
+        try:
+            again = asyncio.run(photos.import_from_urls(
+                db_session, user_id=1, boost_id=boost_id,
+                urls=["https://cdn.example.test/gallery/hero-front.jpg"],
+                upload_dir=str(uploads), limit=10,
+                client=httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)))
+        finally:
+            db_session.close()
+        check("a second import of the same photo is skipped", again["imported"] == 0, str(again))
+        check("and says why", any("already imported" in s["reason"] for s in again["skipped"]), str(again["skipped"]))
+
+        # --- the endpoint contract --------------------------------------------------------
+        bad = client.post("/api/content/import/photos", headers=h, json={"boost_id": boost_id})
+        check("no URL and no listing link is a 400", bad.status_code == 400, str(bad.status_code))
+        empty = client.post("/api/content/import/photos", headers=h, json={
+            "boost_id": boost_id, "urls": ["https://cdn.example.test/gallery/gone.jpg"]})
+        check("an unreadable URL answers with a reason, not a 500",
+              empty.status_code == 201 and empty.json()["imported"] == 0, str(empty.text[:120]))
+
+        stranger = client.post("/api/auth/register", json={
+            "email": f"stranger{abs(hash(db)) % 10**8}@example.com", "password": "photo-pass-12345", "name": "S"})
+        stoken = client.post("/api/auth/login", data={
+            "username": stranger.json()["email"], "password": "photo-pass-12345"}).json()["access_token"]
+        stolen = client.post("/api/content/import/photos", headers={"Authorization": f"Bearer {stoken}"},
+                             json={"boost_id": boost_id, "urls": ["https://cdn.example.test/gallery/kitchen.jpg"]})
+        check("another user cannot import into your campaign", stolen.status_code == 404, str(stolen.status_code))
+
+        count = SessionLocal().query(Asset).filter(Asset.boost_id == boost_id).count()
+        check("nothing extra was written to the gallery", count == 2, str(count))
+
+    print(f"{'FAILED' if FAILS else 'ok'} — listing photo import")
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -4,17 +4,64 @@ function reviewCampaign(){return [...state.campaigns,...examples][ReviewStudio.a
 function reviewCampaignBoostId(){return campaignBoostId(reviewCampaign())}
 // Real listing-photo count for a backend-backed campaign (falls back to nothing in the demo).
 async function refreshPhotoAssets(){
- if(!document.querySelector('[data-photo-count]'))return;
+ const node=document.querySelector('[data-photo-count]');if(!node)return;
  const boostId=reviewCampaignBoostId();if(boostId==null||!window.RM)return;
  try{
   const list=await RM.assets(boostId);
-  const info=await RM.photoIndex(boostId);
-  const node=document.querySelector('[data-photo-count]');if(!node)return;
-  const count=Array.isArray(list)?list.length:((info&&info.assets)||0);
-  node.textContent=count+' listing photos uploaded · photo index ready.';
- }catch{}
+  const photos=(Array.isArray(list)?list:[]).filter(a=>(a.kind||'photo')==='photo');
+  node.textContent=photos.length
+   ?photos.length+' listing photo'+(photos.length===1?'':'s')+' on this campaign — every photo post is matched to one of these.'
+   :'No photos on this campaign yet, so the calendar has no images. Paste the listing link below or upload the photos.';
+  const strip=document.querySelector('[data-photo-thumbs]');
+  if(strip)strip.innerHTML=photos.slice(0,12).map(a=>'<img src="'+esc(a.url)+'" alt="'+esc(a.original_name||'Listing photo')+'" loading="lazy">').join('');
+ }catch(e){node.textContent='Could not read this campaign’s photos. Refresh and try again.'}
 }
-function details(index){if(ReviewStudio.active!==index)ReviewStudio.month=null;ReviewStudio.active=index;const c=[...state.campaigns,...examples][index];if(!c)return;const key='review-'+(c.reviewId||index);state.reviews=state.reviews||{};if(!state.reviews[key])state.reviews[key]={approved:false,items:c.scopeFirst?[]:sampleReviewItems(c)};const r=state.reviews[key];r.scopeFirst=Boolean(c.scopeFirst);r.liveGeneration=Boolean(c.liveGeneration);r.scope ||= initialCampaignScope(c);if(examples.includes(c)&&!r.scope.demoBrief&&!r.scopeConfirmed&&!r.approved){r.scope.highlights ||= demoPropertyHighlights(c);r.scope.demoBrief=true;}$('#content').innerHTML=`<div class="review-heading"><h1>${esc(r.scope.address)}</h1></div>${campaignScopePanel(r)}${reviewCalendar(r,c)}<div class="review-approval"><div><h2 class="campaign-step-title"><span>3</span> ${r.approved?'Campaign approved':'Approve the campaign'}</h2><p>Approve the full calendar when you’re happy with the scope and creative.</p><p class="fine">${r.approved?'Approval saved. Nothing has been published.':!r.items.length?'Approve the property scope to build the calendar.':r.items.filter(i=>i.reviewed).length+' of '+r.items.length+' items spot-checked · Individual review is optional. Approve the scope and calendar first.'}</p></div>${r.approved?'<button onclick="launchOrder()">Review launch →</button>'+(reviewCampaignBoostId()!=null?' <button class="alt" onclick="publishApprovedPosts()">Publish approved posts →</button>':''):`<button class="campaign-primary scope-approval-button" onclick="approveReview()" ${r.scopeConfirmed&&r.calendarApproved&&r.items.length?'':'disabled'}>Approve entire campaign →</button>`}</div><section class="panel"><h3>Reports for this property</h3><ul class="campaign-report-list">${[7,14].map(day=>`<li><strong>Day ${day} report</strong>${Number(c.day)>=day?`<button class="alt" onclick="campaignReport([...state.campaigns,...examples][${index}],${day})">View report ↗</button>`:`<span class="fine">${c.day?'Available on day '+day:'Available after launch'}</span>`}</li>`).join('')}</ul></section>`;refreshPhotoAssets();persist()}
+/* Photos the engine can actually use. Posts carry an image only when the plan names an
+ * Asset, so this panel is the difference between a photo calendar and a text one. */
+function photosPanel(r){
+ const boostId=reviewCampaignBoostId();
+ if(boostId==null)return '';
+ const listing=String((r.scope&&r.scope.listing)||'');
+ const seed=/^https?:\/\//i.test(listing)?esc(listing):'';
+ return '<section class="panel campaign-photos"><h2 class="campaign-step-title"><span>1</span> Listing photos</h2>'
+  +'<p data-photo-count>Checking this campaign’s photos…</p>'
+  +'<p class="fine">Paste the listing link and Resmara pulls the gallery, or upload the photos yourself. Without photos the calendar stays text-only.</p>'
+  +'<label class="scope-field">Listing link<input id="photo-listing-url" type="url" inputmode="url" placeholder="https://your-listing-page/…" value="'+seed+'"></label>'
+  +'<div class="modal-actions">'
+  +'<button class="campaign-primary" type="button" onclick="importListingPhotos(this)">Import photos from listing →</button>'
+  +'<label class="alt button-like">Upload photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadCampaignPhotos(this)"></label>'
+  +'</div><p class="fine" role="status" data-photo-status></p><div class="photo-thumbs" data-photo-thumbs></div></section>';
+}
+async function importListingPhotos(button){
+ const boostId=reviewCampaignBoostId();if(boostId==null||!window.RM)return;
+ const field=document.getElementById('photo-listing-url');
+ const status=document.querySelector('[data-photo-status]');
+ const url=((field&&field.value)||'').trim();
+ if(!/^https?:\/\//i.test(url)){if(status)status.textContent='Paste the full listing link first.';if(field)field.focus();return}
+ button.disabled=true;if(status)status.textContent='Pulling the gallery from that page…';
+ try{
+  const res=await RM.importPhotos(boostId,{listingUrl:url,limit:10});
+  const n=(res&&res.imported)||0;
+  if(status)status.textContent=n
+   ?'Imported '+n+' photo'+(n===1?'':'s')+'. Rebuild the campaign to put them in the calendar.'
+   :(res&&res.detail)||'No photos found on that page. Try direct image links or uploads.';
+  await refreshPhotoAssets();
+ }catch(e){if(status)status.textContent=e.message}
+ finally{button.disabled=false}
+}
+async function uploadCampaignPhotos(input){
+ const boostId=reviewCampaignBoostId();if(boostId==null||!window.RM)return;
+ const files=[...(input.files||[])];if(!files.length)return;
+ const status=document.querySelector('[data-photo-status]');
+ if(status)status.textContent='Uploading '+files.length+' photo'+(files.length===1?'':'s')+'…';
+ let ok=0;
+ for(const file of files){try{await RM.uploadPhoto(file,boostId,'photo');ok++}catch(e){}}
+ if(status)status.textContent=ok
+  ?'Uploaded '+ok+'. Rebuild the campaign to put them in the calendar.'
+  :'Upload failed — use a JPEG, PNG or WebP under 500 KB.';
+ input.value='';await refreshPhotoAssets();
+}
+function details(index){if(ReviewStudio.active!==index)ReviewStudio.month=null;ReviewStudio.active=index;const c=[...state.campaigns,...examples][index];if(!c)return;const key='review-'+(c.reviewId||index);state.reviews=state.reviews||{};if(!state.reviews[key])state.reviews[key]={approved:false,items:c.scopeFirst?[]:sampleReviewItems(c)};const r=state.reviews[key];r.scopeFirst=Boolean(c.scopeFirst);r.liveGeneration=Boolean(c.liveGeneration);r.scope ||= initialCampaignScope(c);if(examples.includes(c)&&!r.scope.demoBrief&&!r.scopeConfirmed&&!r.approved){r.scope.highlights ||= demoPropertyHighlights(c);r.scope.demoBrief=true;}$('#content').innerHTML=`<div class="review-heading"><h1>${esc(r.scope.address)}</h1></div>${campaignScopePanel(r)}${photosPanel(r)}${reviewCalendar(r,c)}<div class="review-approval"><div><h2 class="campaign-step-title"><span>3</span> ${r.approved?'Campaign approved':'Approve the campaign'}</h2><p>Approve the full calendar when you’re happy with the scope and creative.</p><p class="fine">${r.approved?'Approval saved. Nothing has been published.':!r.items.length?'Approve the property scope to build the calendar.':r.items.filter(i=>i.reviewed).length+' of '+r.items.length+' items spot-checked · Individual review is optional. Approve the scope and calendar first.'}</p></div>${r.approved?'<button onclick="launchOrder()">Review launch →</button>'+(reviewCampaignBoostId()!=null?' <button class="alt" onclick="publishApprovedPosts()">Publish approved posts →</button>':''):`<button class="campaign-primary scope-approval-button" onclick="approveReview()" ${r.scopeConfirmed&&r.calendarApproved&&r.items.length?'':'disabled'}>Approve entire campaign →</button>`}</div><section class="panel"><h3>Reports for this property</h3><ul class="campaign-report-list">${[7,14].map(day=>`<li><strong>Day ${day} report</strong>${Number(c.day)>=day?`<button class="alt" onclick="campaignReport([...state.campaigns,...examples][${index}],${day})">View report ↗</button>`:`<span class="fine">${c.day?'Available on day '+day:'Available after launch'}</span>`}</li>`).join('')}</ul></section>`;refreshPhotoAssets();persist()}
 function sampleReviewItems(c){return Array.from({length:16},(_,i)=>({id:i,day:i<2?1:i-1,title:i===0?'Photo carousel ad':i===1?'Video ad':['Just listed','Property highlights','Step inside','Room spotlight','The details','Video walkthrough','Weekend viewing','A closer look','Neighbourhood','Design details','Property reel','Key features','Viewing reminder','Final spotlight'][i-2],kind:i<2?'Meta ad':([4,7,12,15].includes(i)?'Video post':'Photo post'),caption:campaignSampleCaption(c,i),image:i%3===0?img2:img,reviewed:false}))}
 function activeReview(){return state.reviews['review-'+(([...state.campaigns,...examples][ReviewStudio.active]||{}).reviewId||ReviewStudio.active)]}
 function reviewCheck(k,v){const r=activeReview();if(r.approved)return;r[k]=v;persist()}

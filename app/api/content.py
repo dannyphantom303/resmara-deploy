@@ -8,6 +8,7 @@ import os
 import shutil
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db.session import get_db, User, Boost, Post, Ad, Creative, Asset, Event, AdAccount
 from app.core.security import get_current_user
@@ -21,6 +22,14 @@ UPLOAD_DIR = settings.UPLOAD_DIR
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 SAFE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".m4v", ".heic"}
+
+
+class PhotoImportRequest(BaseModel):
+    """Either a listing page to scrape, or the direct image URLs to pull."""
+    boost_id: int
+    listing_url: str | None = None
+    urls: list[str] = []
+    limit: int = 10
 
 
 def _owned_boost(boost_id: int, current_user: User, db: Session) -> Boost:
@@ -83,6 +92,47 @@ async def upload_many(boost_id: int = Form(None), kind: str = Form("photo"),
         db.refresh(asset)
         out.append({"asset_id": asset.id, "url": url, "original_name": asset.original_name, "size": size})
     return {"count": len(out), "assets": out}
+
+
+@router.post("/import/photos", status_code=201)
+async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User = Depends(get_current_user),
+                                db: Session = Depends(get_db)):
+    """Pull a campaign's gallery in: from a listing page, or from direct image URLs.
+
+    Posts only show a photo when the engine's plan names an Asset that exists, so an
+    empty gallery means an all-text calendar. This is the way photos get in without a
+    manual file picker per post.
+    """
+    from app.services import photos
+
+    boost = _owned_boost(payload.boost_id, current_user, db)
+    limit = max(1, min(int(payload.limit or photos.DEFAULT_LIMIT), 20))
+    urls = [u.strip() for u in (payload.urls or []) if (u or "").strip()][:limit]
+    source = "urls"
+    listed = 0
+    if not urls:
+        if not (payload.listing_url or "").strip():
+            raise HTTPException(status_code=400, detail="Give a listing URL or at least one image URL.")
+        try:
+            urls = await photos.discover(payload.listing_url.strip(), limit=limit)
+        except Exception as exc:  # a bot wall or a dead page is the caller's problem to see
+            raise HTTPException(status_code=400, detail=f"Could not read that listing page: {exc.__class__.__name__}")
+        source = "listing_url"
+        listed = len(urls)
+        if not urls:
+            return {"boost_id": boost.id, "source": source, "found": 0, "imported": 0,
+                    "assets": [], "skipped": [],
+                    "detail": "No image links on that page. Upload the photos directly, or paste direct image URLs."}
+
+    result = await photos.import_from_urls(
+        db, user_id=current_user.id, boost_id=boost.id, urls=urls,
+        upload_dir=UPLOAD_DIR, limit=limit,
+    )
+    result.update({"boost_id": boost.id, "source": source, "found": listed or len(urls)})
+    if not result["imported"]:
+        result["detail"] = ("Nothing could be downloaded. Use direct image URLs "
+                            "(right-click a photo → Copy image address) or upload files.")
+    return result
 
 
 @router.get("/assets/{boost_id}")

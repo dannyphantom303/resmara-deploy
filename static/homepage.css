@@ -240,3 +240,8 @@ button.campaign-primary:disabled,.review-approval button:disabled{background:#dc
 .workspace-tour-tip h2{margin:6px 0;font-size:1.25rem}.workspace-tour-tip p{margin:8px 0 14px}
 
 #listing-address-manual[hidden]{display:none} #listing-address-lookup gmp-place-autocomplete{display:block;width:100%;margin:6px 0} #listing-address-lookup:empty{display:none}
+
+/* Listing photos panel: the engine can only place photos it has as assets. */
+.photo-thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-top:12px}
+.photo-thumbs img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;border:1px solid #c9dce7}
+.button-like{cursor:pointer;display:inline-flex;align-items:center;justify-content:center}

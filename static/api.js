@@ -207,6 +207,17 @@
     return request('/api/content/photo-index/' + segment(boostId));
   }
 
+  // Pull a listing's gallery (or direct image URLs) into the campaign.
+  function importPhotos(boostId, opts) {
+    opts = opts || {};
+    return json('/api/content/import/photos', 'POST', {
+      boost_id: boostId,
+      listing_url: opts.listingUrl || null,
+      urls: opts.urls || [],
+      limit: opts.limit || 10,
+    });
+  }
+
   function tagAssets(boostId) {
     return request('/api/content/assets/' + segment(boostId) + '/tag', { method: 'POST' });
   }
@@ -381,6 +392,7 @@
     publishNow: publishNow,
     report: report,
     photoIndex: photoIndex,
+    importPhotos: importPhotos,
     tagAssets: tagAssets,
     createTicket: createTicket,
     tickets: tickets,

@@ -262,6 +262,13 @@ async function startCampaignScope(button){
   const adAccountId=await firstAdAccountId();
   const boost=await RM.createBoost({address:submitted.address,campaign_days:14,ad_budget_usd:50,ad_account_id:adAccountId,property_facts:[submitted.facts,submitted.url?'Listing: '+submitted.url:''].filter(Boolean).join('\n')||undefined});
   if(!boost||boost.id==null)throw new Error('The API did not return a campaign id.');
+  // Bring the gallery in now: a post can only show a photo that exists as an asset, so an
+  // empty gallery here means a text-only calendar later. A bot-walled listing is not fatal.
+  if(progress?.isConnected)progress.textContent='Finding the photos on your listing…';
+  try{
+   const pulled=await RM.importPhotos(boost.id,{listingUrl:submitted.url||undefined,urls:[...(submitted.photos||[])].slice(0,10),limit:10});
+   if(progress?.isConnected&&pulled&&pulled.imported)progress.textContent='Imported '+pulled.imported+' listing photos. Linking your ad account…';
+  }catch(photoError){/* keep going: the photos can be added from the campaign page */}
   liveCampaignsSyncedAt=0;
   if(state===account&&state.clientSignedIn&&modal.open&&progress?.isConnected)saveDraft({...submitted,creditUsed:1,scopeFirst:true,liveGeneration:true,boostId:boost.id,adAccountId:adAccountId||undefined});
  }catch(error){
