@@ -182,8 +182,23 @@ def test_bundle_excludes_secrets():
     check("the bundle script fails the moment a secret slips in", "exit 1" in script)
 
 
+def test_managed_host_database_urls():
+    """Render/Fly hand out a bare postgresql:// URL; the image ships psycopg 3, not psycopg2."""
+    print("managed database urls")
+    from app.db.urls import normalize_database_url
+    for given, want in [("postgres://u:p@host:5432/db", "postgresql+psycopg://u:p@host:5432/db"),
+                        ("postgresql://u:p@host/db", "postgresql+psycopg://u:p@host/db"),
+                        ("postgresql+psycopg://u:p@host/db", "postgresql+psycopg://u:p@host/db"),
+                        ("sqlite:///./resmara.db", "sqlite:///./resmara.db")]:
+        check(f"{given.split('//')[0]}// resolves to {want.split('//')[0]}//",
+              normalize_database_url(given) == want, normalize_database_url(given))
+    check("session.py asks for driver normalization",
+          "normalize_database_url(" in (ROOT / "app/db/session.py").read_text())
+
+
 def main():
     db = test_uploads_mount_follows_the_setting()
+    test_managed_host_database_urls()
     test_deploy_package_is_complete()
     test_scripts_run()
     test_bundle_excludes_secrets()

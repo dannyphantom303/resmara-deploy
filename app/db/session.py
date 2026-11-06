@@ -2,7 +2,9 @@ import os
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./resmara.db")
+from app.db.urls import normalize_database_url
+
+SQLALCHEMY_DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./resmara.db"))
 if "sqlite" in SQLALCHEMY_DATABASE_URL:
     connect_args = {"check_same_thread": False}
 else:
