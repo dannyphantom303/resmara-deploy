@@ -80,6 +80,7 @@ DEFAULT_HOSTED_TIMEOUT = 180.0
 # Output cap for a non-OpenAI endpoint: a small model left uncapped will ramble for
 # thousands of tokens, which reads as a hang. 0 disables the cap.
 ENGINE_MAX_TOKENS_ENV = "RESMARA_ENGINE_MAX_TOKENS"
+ENGINE_REASONING_ENV = "RESMARA_ENGINE_REASONING"
 DEFAULT_LOCAL_MAX_TOKENS = 8192
 # A hosted reasoning model on a compatible endpoint spends the budget on its trace before it
 # writes a single character of `content`. Measured on ollama.com 2026-11-06: the 14-day plan
@@ -159,6 +160,14 @@ def _for_provider(payload: dict) -> dict:
         # gemma4:e4b-mlx 2026-11-04: "none" -> the answer, no trace; "think": false on the
         # OpenAI-compatible route is ignored.
         sent["reasoning_effort"] = "none"
+    # Same trap on a hosted compatible endpoint: glm-5.3 burned its entire 32k budget on trace
+    # and returned content="" with finish_reason="length" (60k made no difference). Turning the
+    # trace off is not the answer either — with reasoning_effort "none" it answered in 122k
+    # characters of prose instead of JSON. Pick a model that answers before it thinks:
+    # deepseek-v4.1-flash returns the 14-day plan in one stop (measured 2026-11-06).
+    reasoning = os.getenv(ENGINE_REASONING_ENV)
+    if reasoning and not is_openai_native():
+        sent["reasoning_effort"] = reasoning
     if is_local_base():
         num_ctx = int(os.getenv(ENGINE_NUM_CTX_ENV) or DEFAULT_LOCAL_NUM_CTX)
         sent["options"] = {**(sent.get("options") or {}), "num_ctx": num_ctx}
