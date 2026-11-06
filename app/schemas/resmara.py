@@ -7,6 +7,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: Optional[str] = None
+    # Only needed while the beta gate is on (RESMARA_SIGNUP_CODE); ignored when signup is open.
+    invite_code: Optional[str] = None
 
 class UserOut(BaseModel):
     id: int

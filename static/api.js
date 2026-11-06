@@ -158,8 +158,12 @@
     return body;
   }
 
-  function register(email, password, name) {
-    return json('/api/auth/register', 'POST', { email: email, password: password, name: name });
+  function register(email, password, name, inviteCode) {
+    // invite_code is only sent when there is one: the open-signup path keeps the exact body
+    // it always had, and the beta gate treats a missing code the same as an empty one.
+    var body = { email: email, password: password, name: name };
+    if (inviteCode) body.invite_code = inviteCode;
+    return json('/api/auth/register', 'POST', body);
   }
 
   function me() {

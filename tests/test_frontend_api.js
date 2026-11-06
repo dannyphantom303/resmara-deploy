@@ -115,6 +115,13 @@ async function one(name, run, expect) {
       jsonBody: { email: 'new@example.com', password: 'pw123456', name: 'Dana Agent' } });
   eq('RM.register() returns the created account', reg.result, {});
 
+  // Private beta: the invite code rides along when the create-account form supplies one.
+  const regInvite = await one('RM.register with invite', () => RM.register('new@example.com', 'pw123456', 'Dana Agent', 'beta-123'),
+    { method: 'POST', path: '/api/auth/register', contentType: 'application/json',
+      jsonBody: { email: 'new@example.com', password: 'pw123456', name: 'Dana Agent', invite_code: 'beta-123' } });
+  eq('RM.register() without a code sends no invite_code', 'invite_code' in (reg.body || {}), false);
+  eq('RM.register() returns the account for an invite too', regInvite.result, {});
+
   await one('RM.me', () => RM.me(), { method: 'GET', path: '/api/auth/me' });
 
   // ---- boosts ----------------------------------------------------------------

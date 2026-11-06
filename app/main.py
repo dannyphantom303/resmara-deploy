@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from app.api import api_router
 from app.core.config import settings
@@ -67,6 +67,14 @@ def serve_upload(filename: str):
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 app.include_router(api_router, prefix="/api")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots():
+    """A testing site should not be indexed. Remove this once the beta gate comes off."""
+    if settings.SIGNUP_EMAILS or settings.SIGNUP_CODE:
+        return Response(content="User-agent: *\nDisallow: /\n", media_type="text/plain")
+    return Response(content="User-agent: *\nAllow: /\n", media_type="text/plain")
 
 # Serve static frontend at root (after API routes)
 if os.path.isdir("static"):

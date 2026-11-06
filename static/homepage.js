@@ -57,13 +57,14 @@ function signOutDemo(){state.clientSignedIn=false;persist();home();window.scroll
 function clientAccess(mode='signin'){
  if(state.clientSignedIn){dashboard();return}
  const creating=mode==='create';
- show(`<span class="eyebrow">RESMARA CLIENT AREA</span><h2>${creating?'Create a test account':'Client Login'}</h2><p>${creating?'Set up your workspace and start onboarding.':'Enter your email and password.'}</p><form onsubmit="event.preventDefault();submitTestClient(this,${creating})">${creating?'<label class="field">Full name<input name="clientName" required maxlength="120" autocomplete="name"></label>':''}<label class="field">Email address<input name="clientEmail" type="email" required maxlength="254" autocomplete="email"></label><label class="field">Password<input name="clientPassword" type="password" required minlength="6" autocomplete="current-password" value="test123"></label><p class="fine" role="status"></p><div class="modal-actions"><button>${creating?'Create account →':'Sign in →'}</button><button type="button" class="alt" onclick="clientAccess('${creating?'signin':'create'}')">${creating?'Back to sign in':'Create an account'}</button></div></form>${state.name&&!state.email?'<button class="alt" onclick="resumeDemo()">Resume previous demo →</button>':''}<p class="fine">Connected to Resmara backend API.</p>`);
+ show(`<span class="eyebrow">RESMARA CLIENT AREA</span><h2>${creating?'Create an account':'Client Login'}</h2><p>${creating?'Resmara is in private beta. Use the invite code you were sent, or an invited email address.':'Enter your email and password.'}</p><form onsubmit="event.preventDefault();submitTestClient(this,${creating})">${creating?'<label class="field">Full name<input name="clientName" required maxlength="120" autocomplete="name"></label>':''}<label class="field">Email address<input name="clientEmail" type="email" required maxlength="254" autocomplete="email"></label><label class="field">Password<input name="clientPassword" type="password" required minlength="6" autocomplete="current-password" value="test123"></label>${creating?'<label class="field">Invite code<input name="inviteCode" maxlength="64" autocomplete="off" spellcheck="false" placeholder="From your invitation"></label>':''}<p class="fine" role="status"></p><div class="modal-actions"><button>${creating?'Create account →':'Sign in →'}</button><button type="button" class="alt" onclick="clientAccess('${creating?'signin':'create'}')">${creating?'Back to sign in':'Create an account'}</button></div></form>${state.name&&!state.email?'<button class="alt" onclick="resumeDemo()">Resume previous demo →</button>':''}<p class="fine">Connected to Resmara backend API.</p>`);
 }
 function resumeDemo(){state.clientSignedIn=true;persist();modal.close();dashboard()}
 function submitTestClient(form,creating){
  const email=form.elements.clientEmail.value.trim().toLowerCase();
  const password=form.elements.clientPassword?form.elements.clientPassword.value:'test123';
  const name=creating?form.elements.clientName.value.trim():'';
+ const invite=creating&&form.elements.inviteCode?form.elements.inviteCode.value.trim():'';
  const status=form.querySelector('[role="status"]');
  if(creating&&!name){status.textContent='Enter your name.';return}
  if(!window.RM){status.textContent='The API client is unavailable in this browser.';return}
@@ -72,7 +73,7 @@ function submitTestClient(form,creating){
  (async()=>{
   let account;
   if(creating){
-   account=await RM.register(email,password,name);
+   account=await RM.register(email,password,name,invite);
    // Register returns the account (no token), so sign in to obtain one. Best effort.
    try{const session=await RM.login(email,password);if(session&&session.access_token)RM.setToken(session.access_token)}catch{}
   }else{

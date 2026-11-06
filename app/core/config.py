@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Never silently on in production — the engine reports source="offline" when it is.
     SIMULATE: bool = os.getenv("RESMARA_SIMULATE", "").lower() in ("1", "true", "yes")
 
+    # Private beta: the site is on a public domain before launch, so creating an account is
+    # gated. Either the address is on the allowlist, or the caller knows SIGNUP_CODE. Both
+    # unset = open signup (local development and tests). See app/services/access.py.
+    SIGNUP_EMAILS: str = os.getenv("RESMARA_SIGNUP_EMAILS", "")
+    SIGNUP_CODE: str = os.getenv("RESMARA_SIGNUP_CODE", "")
+
     # Where this app is publicly reachable. Needed for Meta callbacks AND for Instagram,
     # which fetches post media by URL (Graph has no direct file upload for IG feed posts).
     # Hosts that inject their own public origin need no configuration at all: Render sets

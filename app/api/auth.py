@@ -12,6 +12,7 @@ from app.db.session import get_db, User, PasswordReset, Event
 from app.core.security import get_password_hash, verify_password, create_access_token, get_current_user
 from app.schemas.resmara import UserCreate, UserOut, Token
 from app.services import mail
+from app.services.access import signup_block_reason
 
 router = APIRouter()
 
@@ -21,6 +22,10 @@ RESET_TTL_MINUTES = 60
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     email = user_in.email.strip().lower()
+    blocked = signup_block_reason(email, getattr(user_in, "invite_code", None),
+                                  settings.SIGNUP_EMAILS, settings.SIGNUP_CODE)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     user = User(email=email, hashed_password=get_password_hash(user_in.password), name=user_in.name)
