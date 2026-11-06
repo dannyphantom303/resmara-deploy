@@ -163,6 +163,18 @@ function saveCampaignScope(form){
  }
  if(next.start!==r.scope.start)ReviewStudio.month=null;
  r.scope={...r.scope,...next};r.brandProfile=campaignBrandProfile();r.scopeConfirmed=true;r.calendarApproved=false;r.needsBuild=r.scopeFirst;
+ // The scope form already collects the photo gallery URL. Use it: a scope that names a
+ // gallery but leaves the campaign with no photos is exactly the "why is my calendar blank"
+ // case. Failing here must not block approval — the photos panel can still import by hand.
+ const gallery=String(r.scope.media||r.scope.listing||'').trim();
+ const boostId=reviewCampaignBoostId();
+ if(boostId!=null&&window.RM&&/^https?:\/\//i.test(gallery)){
+  RM.importPhotos(boostId,{listingUrl:gallery,limit:10}).then(res=>{
+   if(res&&res.imported)toast('Imported '+res.imported+' listing photo'+(res.imported===1?'':'s')+'.');
+   else if(res&&res.detail)toast(res.detail);
+   refreshPhotoAssets();
+  }).catch(()=>{});
+ }
  persist();if(r.scopeFirst){buildApprovedScope();return}details(ReviewStudio.active);document.querySelector('.review-calendar')?.scrollIntoView({block:'start'});toast('Property scope approved.');
 }
 
