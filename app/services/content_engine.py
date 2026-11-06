@@ -49,6 +49,10 @@ AGENT_CARD_KEYS = (
     "property_page_text",
 )
 
+# A listing gallery is 8-20 photos; tagging more than this spends vision calls for photos
+# the plan will not reach anyway.
+MAX_TAG_PHOTOS = 12
+
 # The doc-14 ROOM values (used only for a sanity check on offline tagging).
 _DOC_ROOMS = {
     "front exterior", "rear exterior", "aerial", "street view", "kitchen",
@@ -146,6 +150,27 @@ def build_photo_index(assets) -> str:
             line = line + " | upload: " + original
         lines.append(line)
     return " ;; ".join(lines)
+
+
+def post_image_urls(plan_posts, url_by_file: dict, gallery_urls: list[str]) -> tuple[list[str], int]:
+    """The image for each plan post, in plan order, plus how many were rotated in.
+
+    A post gets the photo the plan named when that name is a real Asset. When the plan names
+    nothing usable ("NEEDS PHOTO" is the repaired form of an empty photoFile) the gallery is
+    rotated instead of leaving the card blank — the model often cannot tell the photos apart
+    even though the agent uploaded them.
+    """
+    gallery = [u for u in (gallery_urls or []) if u]
+    urls: list[str] = []
+    rotated = 0
+    for post in plan_posts or []:
+        named = post.get("photoFile") if isinstance(post, dict) else None
+        url = url_by_file.get(named, "") if named else ""
+        if not url and gallery:
+            url = gallery[rotated % len(gallery)]
+            rotated += 1
+        urls.append(url or "")
+    return urls, rotated
 
 
 def _asset_url_map(assets) -> dict:
@@ -564,6 +589,31 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     photo_index = build_photo_index(assets)
     no_photos = len(photos) == 0
 
+    # --- photos must be seen before the plan can name them -------------------
+    # A freshly imported gallery carries no room/tags, and a plan written from an untagged
+    # PHOTO INDEX answered "NEEDS PHOTO" for all 14 slots on a real 2-photo gallery. Tagging
+    # runs here, inside the background build, where a vision call cannot cost a proxy timeout.
+    if photos:
+        untagged = [a for a in photos
+                    if not getattr(a, "room", None) and not (getattr(a, "tags", None) or [])]
+        if untagged:
+            try:
+                tag_result = await tag_assets(
+                    untagged[:MAX_TAG_PHOTOS], base_url=settings.PUBLIC_BASE_URL, db=db)
+                if db is not None:
+                    db.commit()
+                if tag_result.get("tagged"):
+                    engine_notes.append(
+                        f"Tagged {tag_result['tagged']} of {len(untagged)} listing photos before planning "
+                        f"(engine={tag_result.get('source')}, model={settings.OPENAI_MODEL_CHECK}).")
+                else:
+                    engine_notes.append(
+                        "The vision model tagged none of the listing photos, so the plan could not "
+                        f"choose between them (model={settings.OPENAI_MODEL_CHECK}).")
+            except Exception as exc:  # tagging is an improvement, never a build blocker
+                engine_notes.append(f"Photo tagging failed ({type(exc).__name__}); planning continued.")
+            photo_index = build_photo_index(assets)
+
     # --- R1: property research (Responses API, web search) ------------------
     r1_input = prompts.R1_PROPERTY_RESEARCH.format(address=address)
     research = await llm.responses_text(
@@ -693,6 +743,11 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     boost.main_status = "Team Review"
 
     url_by_file = _asset_url_map(assets)
+    # A plan that names no photo leaves a blank card even though the gallery is full (the
+    # model answers "NEEDS PHOTO" when it cannot tell the photos apart). Rotate the real
+    # photos through those slots instead: a caption about the house with a photo of the
+    # house beats an empty calendar square. Reported in the build notes, never silently.
+    gallery_urls = [getattr(a, "url", "") for a in photos if getattr(a, "url", "")]
 
     base_date = date.today()
     if getattr(boost, "go_live_date", None):
@@ -712,6 +767,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         )
 
     # delete-or-update posts for this boost
+    plan_images, rotated = post_image_urls(plan_posts, url_by_file, gallery_urls)
     if force and db is not None:
         db.query(Post).filter(Post.boost_id == boost.id).delete()
         existing: dict = {}
@@ -721,7 +777,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                     if db is not None else {})
 
     posts_created = 0
-    for p in plan_posts:
+    for index, p in enumerate(plan_posts):
         if not isinstance(p, dict):
             continue
         day = _as_int(p.get("day")) or 1
@@ -742,7 +798,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         post.caption = caption + (("\n\n" + hashtags_str) if hashtags_str else "")
         post.hashtags = hashtags_str
         post.cta = p.get("cta")
-        post.image_url = url_by_file.get(p.get("photoFile"), "") or ""
+        post.image_url = plan_images[index] if index < len(plan_images) else ""
         target_date = base_date + timedelta(days=day - 1)
         slot_time = time(9, 0) if slot == 1 else time(19, 0)
         post.publish_at = datetime.combine(target_date, slot_time).isoformat()
@@ -798,6 +854,12 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     else:
         ad_id = None
 
+    if rotated:
+        engine_notes.append(
+            f"{rotated} post(s) had no photo named by the plan and were given photos from the "
+            "listing gallery in upload order; re-tag or reorder the gallery to control which photo "
+            "each post uses.")
+
     return {
         "source": source,
         "engine": engine,
@@ -809,6 +871,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         "repairs": repairs,
         "missing_info": missing_info,
         "posts_created": posts_created,
+        "photos_used": rotated,
         "ad_id": ad_id,
         "model": {
             "research": settings.OPENAI_MODEL_RESEARCH,

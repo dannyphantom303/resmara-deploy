@@ -172,6 +172,22 @@ def main() -> int:
         count = SessionLocal().query(Asset).filter(Asset.boost_id == boost_id).count()
         check("nothing extra was written to the gallery", count == 2, str(count))
 
+    # --- a plan that names no photo must still fill the calendar ---------------------------
+    from app.services.content_engine import post_image_urls
+
+    gallery = ["/uploads/one.jpg", "/uploads/two.webp"]
+    plan = [{"day": 1, "photoFile": "one.jpg"}, {"day": 2, "photoFile": "NEEDS PHOTO"},
+            {"day": 3, "photoFile": ""}, {"day": 4}]
+    images, rotated = post_image_urls(plan, {"one.jpg": "/uploads/one.jpg"}, gallery)
+    check("a named photo is used as-is", images[0] == "/uploads/one.jpg", str(images))
+    check("an unmatched slot takes a real gallery photo instead of nothing",
+          all(u.startswith("/uploads/") for u in images), str(images))
+    check("rotation spreads the gallery", images[1] != images[2], str(images))
+    check("the count of rotated photos is reported", rotated == 3, str(rotated))
+    empty_images, empty_rotated = post_image_urls(plan, {}, [])
+    check("with no photos at all nothing is invented",
+          all(u == "" for u in empty_images) and empty_rotated == 0, str(empty_images))
+
     print(f"{'FAILED' if FAILS else 'ok'} — listing photo import")
     return 1 if FAILS else 0
 
