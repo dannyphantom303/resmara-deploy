@@ -13,12 +13,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+import time
 
-from app.db.session import get_db, User, Boost, AdAccount, Post, Event
+from app.db.session import get_db, SessionLocal, User, Boost, AdAccount, Post, Event
 from app.core.security import get_current_user
 from app.services.credits import check_credit, CampaignStage, CampaignAction
 
 router = APIRouter()
+
+# A real build runs four model calls and takes minutes, which is longer than a hosted
+# platform's request timeout (Render answers 502 at ~100s and the client hangs up, cancelling
+# the request task mid-build). So /build starts the run in the background and answers 202 at
+# once; the UI and the deploy checks follow it through /build-status.
+_BUILDS: dict = {}
 
 
 def _owned_boost(boost_id: int, current_user: User, db: Session) -> Boost:
@@ -42,24 +50,79 @@ class BuildRequest(BaseModel):
     openings: Optional[dict] = None
 
 
-@router.post("/boosts/{boost_id}/build")
+async def _run_build(boost_id: int, user_id: int, force: bool, openings: Optional[dict]):
+    """The actual engine run, on its own session so it outlives the request that started it."""
+    from app.services.content_engine import build_campaign as run_engine
+
+    state = _BUILDS.setdefault(boost_id, {})
+    state.update({"status": "running", "started_at": time.time(), "error": None, "posts_created": 0})
+    db = SessionLocal()
+    try:
+        boost = db.query(Boost).filter(Boost.id == boost_id).first()
+        user = db.query(User).filter(User.id == user_id).first()
+        if not boost or not user:
+            state.update({"status": "error", "error": "boost or user disappeared mid-build"})
+            return
+        result = await run_engine(boost, db, force=force, openings=openings)
+        state.update({
+            "status": "done",
+            "posts_created": result.get("posts_created") or 0,
+            "source": result.get("source"),
+            "violations": len(result.get("violations") or []),
+            "notes": (result.get("notes") or [])[:6],
+        })
+        _log(db, user, boost_id, "campaign_built", {
+            "source": result.get("source"), "posts": result.get("posts_created"),
+            "violations": len(result.get("violations") or []),
+        })
+        db.commit()
+    except Exception as e:  # noqa: BLE001 - the build may fail for a dozen reasons; record it
+        db.rollback()
+        state.update({"status": "error", "error": str(e)[:400]})
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                _log(db, user, boost_id, "error", {"where": "build_campaign", "error": str(e)[:400]})
+                db.commit()
+        except Exception:
+            db.rollback()
+    finally:
+        state["finished_at"] = time.time()
+        db.close()
+
+
+@router.post("/boosts/{boost_id}/build", status_code=202)
 async def build_campaign(boost_id: int, body: BuildRequest = BuildRequest(),
                          current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Run the content engine: research -> brand -> style recipe -> N-day plan -> posts."""
-    from app.services.content_engine import build_campaign as run_engine
+    """Start the content engine: research -> brand -> style recipe -> N-day plan -> posts.
+
+    Answers 202 immediately and runs the engine in the background; poll /build-status for the
+    outcome. Four model calls take minutes, which no hosted proxy will hold open.
+    """
     boost = _owned_boost(boost_id, current_user, db)
-    try:
-        result = await run_engine(boost, db, force=body.force, openings=body.openings)
-    except Exception as e:  # surface the engine failure instead of a bare 500
-        _log(db, current_user, boost_id, "error", {"where": "build_campaign", "error": str(e)[:400]})
-        db.commit()
-        raise HTTPException(status_code=502, detail=f"Content engine failed: {e}")
-    _log(db, current_user, boost_id, "campaign_built", {
-        "source": result.get("source"), "posts": result.get("posts_created"),
-        "violations": len(result.get("violations") or []),
-    })
-    db.commit()
-    return result
+    state = _BUILDS.get(boost.id) or {}
+    if state.get("status") == "running" and not body.force:
+        return {"status": "running", "boost_id": boost.id, "started_at": state.get("started_at")}
+    asyncio.create_task(_run_build(boost.id, current_user.id, body.force, body.openings))
+    _BUILDS[boost.id] = {"status": "running", "started_at": time.time(), "error": None}
+    return {"status": "running", "boost_id": boost.id, "started_at": _BUILDS[boost.id]["started_at"]}
+
+
+@router.get("/boosts/{boost_id}/build-status")
+def build_status(boost_id: int, current_user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    """How the last build for this boost is going (the UI polls this instead of holding a request)."""
+    boost = _owned_boost(boost_id, current_user, db)
+    state = dict(_BUILDS.get(boost.id) or {})
+    if not state:
+        posts = db.query(Post).filter(Post.boost_id == boost.id).count()
+        state = {"status": "done" if posts else "idle", "posts_created": posts}
+    state["boost_id"] = boost.id
+    if state.get("started_at") and state.get("finished_at"):
+        state["seconds"] = round(state["finished_at"] - state["started_at"], 1)
+    state.pop("started_at", None)
+    state.pop("finished_at", None)
+    return state
 
 
 @router.get("/boosts/{boost_id}/plan")

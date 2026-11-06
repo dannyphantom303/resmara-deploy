@@ -227,9 +227,27 @@ async function buildCampaignFromBackend(){
  ReviewStudio.building.add(r);
  show(`<span class="eyebrow">BUILDING YOUR CAMPAIGN</span><h2>Resmara is turning your scope into a campaign.</h2><div class="audit-track campaign-build-track"><span class="robot-avatar" aria-hidden="true"></span></div><p role="status">Running the content engine…</p>`);
  const progress=modal.querySelector('[role="status"]');
+ let finalStatus=null;
  try{
-  const result=await RM.buildCampaign(boostId,{force:false});
+  const started=await RM.buildCampaign(boostId,{force:false});
+  // The build is a background run (four model calls, minutes long) — a single request would be
+  // cut by any hosted proxy. Poll the status, then read the posts it wrote.
+  if(started&&started.status==='running'){
+   const waitStart=Date.now(), limitMs=9*60*1000; let last='running';
+   while(Date.now()-waitStart<limitMs){
+    await new Promise(res=>setTimeout(res,3000));
+    const st=(await RM.buildStatus(boostId).catch(()=>null))||{};
+    if(progress?.isConnected){
+     const secs=Math.round((Date.now()-waitStart)/1000);
+     progress.textContent=`Running the content engine… ${secs}s${st.posts_created?` · ${st.posts_created} posts drafted`:''}`;
+    }
+    if(st.status==='error') throw new Error(st.error||'The content engine stopped without an error message.');
+    if(st.status==='done'){finalStatus=st;last='done';break}
+   }
+   if(last!=='done') throw new Error('The build is still running after 9 minutes. Check the campaign again in a moment — the posts it writes are saved either way.');
+  }
   const backendPosts=await RM.posts(boostId);
+  const result=finalStatus||started||{};
   if(Array.isArray(backendPosts)&&backendPosts.length){
    r.items=backendPosts.map(post=>({id:post.id,postId:post.id,day:post.day||1,title:String(post.caption||'Scheduled post').split(/[.\n]/)[0].slice(0,42)||'Scheduled post',kind:post.kind==='short_video'?'Video post':'Photo post',caption:post.caption||'',image:post.image_url||'',reviewed:post.client_status==='approved',time:(post.publish_at||'').slice(11,16)||undefined}));
   }

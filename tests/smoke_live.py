@@ -107,13 +107,22 @@ def main():
         step("photo index built", r.status_code == 200 and "upload: front-room.jpg" in idx,
              f"{r.status_code} len={len(idx)}")
 
-    # A real build runs four model calls and can take several minutes; the wire test must
-    # not fail just because the app is in real (non-offline) mode.
-    r = c.post(f"/api/boosts/{boost_id}/build", headers=H, json={"force": True}, timeout=1500)
-    j = r.json() if r.status_code == 200 else {}
-    step("content engine build", r.status_code == 200 and j.get("posts_created") == 14,
-         f"{r.status_code} posts={j.get('posts_created')} source={j.get('source')} "
-         f"violations={len(j.get('violations') or [])}")
+    # A real build runs four model calls and can take several minutes, so POST /build answers 202
+    # and the run continues in the background: follow /build-status rather than holding a request
+    # open (a hosted proxy cuts it at ~100s and kills the build).
+    r = c.post(f"/api/boosts/{boost_id}/build", headers=H, json={"force": True}, timeout=60)
+    started = r.status_code in (200, 202)
+    j = {}
+    deadline = time.time() + 1500
+    while started and time.time() < deadline:
+        time.sleep(3)
+        s = c.get(f"/api/boosts/{boost_id}/build-status", headers=H, timeout=60).json()
+        if s.get("status") in ("done", "error"):
+            j = s
+            break
+    step("content engine build", j.get("status") == "done" and j.get("posts_created") == 14,
+         f"{j.get('status')} posts={j.get('posts_created')} source={j.get('source')} "
+         f"violations={j.get('violations')} error={j.get('error')}")
 
     r = c.get(f"/api/boosts/{boost_id}/plan", headers=H)
     plan = r.json().get("plan") or {}

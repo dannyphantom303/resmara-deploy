@@ -237,6 +237,10 @@
     return json('/api/boosts/' + segment(boostId) + '/build', 'POST', { force: !!opts.force });
   }
 
+  function buildStatus(boostId) {
+    return request('/api/boosts/' + segment(boostId) + '/build-status');
+  }
+
   function plan(boostId) {
     return request('/api/boosts/' + segment(boostId) + '/plan');
   }
@@ -365,6 +369,7 @@
     uploadPhoto: uploadPhoto,
     assets: assets,
     buildCampaign: buildCampaign,
+    buildStatus: buildStatus,
     plan: plan,
     posts: posts,
     approvePost: approvePost,

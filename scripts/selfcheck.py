@@ -99,11 +99,21 @@ def main() -> int:
                                files={"file": (fixture.name, fh, "image/jpeg")})
                 if bid:
                     t0 = time.time()
-                    r = c.post(f"/api/boosts/{bid}/build", headers=h, json={"force": True}, timeout=args.timeout)
-                    body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+                    # The build runs in the background now (a hosted proxy cuts a request at ~100s),
+                    # so start it, then follow /build-status.
+                    r = c.post(f"/api/boosts/{bid}/build", headers=h, json={"force": True}, timeout=60)
+                    check("start the campaign build", r.status_code in (200, 202),
+                          f"HTTP {r.status_code}")
+                    body = {}
+                    while time.time() - t0 < args.timeout:
+                        time.sleep(3)
+                        s = c.get(f"/api/boosts/{bid}/build-status", headers=h, timeout=60).json()
+                        if s.get("status") in ("done", "error"):
+                            body = s
+                            break
                     secs = time.time() - t0
-                    check("build the campaign with the content engine", r.status_code < 400,
-                          f"HTTP {r.status_code} in {secs:.0f}s source={body.get('source')}")
+                    check("build the campaign with the content engine", body.get("status") == "done",
+                          f"{body.get('status')} in {secs:.0f}s source={body.get('source')} error={body.get('error')}")
                     if body.get("source") == "offline":
                         print("      note: engine reported source=offline (no model configured) — expected "
                               "on a smoke test, NOT acceptable on a client-facing deployment")
