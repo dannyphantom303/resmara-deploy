@@ -163,6 +163,9 @@ class AdminUserOut(BaseModel):
     campaign_count: int = 0
     # See SupportTicketOut.is_test: test artefacts are flagged, not deleted.
     is_test: bool = False
+    # Whether this account can open /admin.html. Without it the console cannot answer
+    # "why does my login say I am not an admin" -- the flag is the answer.
+    is_admin: bool = False
     class Config:
         from_attributes = True
 
@@ -191,6 +194,7 @@ class MetricsOut(BaseModel):
     content: dict
     support: dict
     advertising: dict
+    revenue: dict = {}
     activity: dict
     unavailable: list
     generated_at: Optional[datetime] = None

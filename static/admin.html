@@ -341,7 +341,8 @@ function renderSums(m){
   $('sum-content').innerHTML = split(ct.real_posts || 0, ct.test_posts || 0, 'real posts') + ' · ' +
     esc((ct.due_now || 0) - (ct.due_now_test || 0)) + ' due now · ' + esc(ct.published || 0) + ' published';
   $('sum-campaigns').innerHTML = split(c.real || 0, c.test_campaigns || 0, 'real') + ' · ' +
-    esc((c.awaiting_build || 0) - (c.awaiting_build_test || 0)) + ' awaiting build';
+    esc((c.awaiting_build || 0) - (c.awaiting_build_test || 0)) + ' awaiting build · ' +
+    esc('$' + Number((m.revenue && m.revenue.paid_usd) || 0).toFixed(2)) + ' collected';
   $('sum-users').innerHTML = split(m.users ? m.users.real || 0 : 0, m.users ? m.users.test_accounts || 0 : 0, 'real account(s)');
   $('sum-advertising').innerHTML = esc(a.accounts || 0) + ' account(s) · ' + esc(a.live_accounts || 0) + ' live token(s)' +
     (a.needs_reconnect ? ' · <b>' + esc(a.needs_reconnect) + ' need reconnect</b>' : '');
@@ -393,7 +394,7 @@ async function loadMetrics(){
     const m = await api('/api/admin/metrics');
     lastMetrics = m;
     const u = m.users || {}, c = m.campaigns || {}, ct = m.content || {}, s = m.support || {},
-          a = m.advertising || {}, act = m.activity || {}, h = m.unavailable || [];
+          a = m.advertising || {}, rev = m.revenue || {}, act = m.activity || {}, h = m.unavailable || [];
     $('testUserCount').textContent = u.test_accounts || 0;
     $('testTicketCount').textContent = s.test_tickets || 0;
     openFromWork(m);
@@ -406,14 +407,26 @@ async function loadMetrics(){
         stat(c.awaiting_build, 'awaiting build', '', c.awaiting_build_test ? c.awaiting_build_test + ' of them test' : '') +
         stat('$' + Number(c.budget_configured_usd || 0).toFixed(2), 'budget configured', 'wide') +
         statRaw(pills(c.by_stage), 'by stage', 'wide') +
-      '</div>';
+      '</div>' +
+      // Money belongs next to campaigns: one campaign is one $49 purchase.
+      (rev.error ? groupError('revenue', rev.error) :
+      '<h3 style="margin:14px 0 6px">Money</h3><div class="grid">' +
+        stat('$' + Number(rev.paid_usd || 0).toFixed(2), 'collected', 'wide',
+          rev.paid_orders + ' paid order(s) of ' + rev.orders) +
+        stat('$' + Number(rev.price_usd || 0).toFixed(2), 'price per campaign', '',
+          rev.stripe_configured ? 'charged through Stripe Checkout' : 'Stripe is not connected — nothing can be bought') +
+        stat(rev.paid_orders, 'campaigns paid for', '', rev.pending_orders ? rev.pending_orders + ' checkout(s) started, not paid' : 'no abandoned checkouts') +
+        stat(fmt(rev.newest_at), 'last order', 'wide') +
+      '</div>');
 
     $('contentBody').innerHTML = ct.error ? groupError('content', ct.error) :
       '<div class="grid">' +
         stat(ct.posts_total, 'posts', '', ct.test_posts ? ct.real_posts + ' real · ' + ct.test_posts + ' test' : '') +
         stat(ct.due_now, 'due for the publisher', '', ct.due_now_test ? ct.due_now_test + ' of them test' : '') +
-        stat(ct.awaiting_approval, 'awaiting approval') + stat(ct.approved, 'approved') +
-        stat(ct.scheduled, 'scheduled') + stat(ct.published, 'published') +
+        // 'awaiting approval' and 'scheduled' can hold the same rows: the engine stamps a
+        // publish time on every draft. The labels now say which question each square answers.
+        stat(ct.awaiting_approval, 'waiting on a human') + stat(ct.approved, 'approved by a human') +
+        stat(ct.scheduled, 'queued with a date') + stat(ct.published, 'actually posted') +
         stat(ct.failed, 'publish failed', '', ct.failed_test ? ct.failed_test + ' of them test' : '') +
         stat(fmt(ct.next_publish_at), 'next publish', 'wide') +
         stat(ct.photos, 'photos', '', ct.photos_test ? ct.photos_test + ' test' : '') +
@@ -475,7 +488,8 @@ function renderUsers(){
   const total = rows.length;
   if (!showAll) rows = rows.slice(0, 25);
   body.innerHTML = rows.length ? rows.map(u =>
-    '<tr' + (u.is_test ? ' class="testrow"' : '') + '><td>' + u.id + '</td><td>' + esc(u.email) + (u.is_test ? ' <span class="pill test">test</span>' : '') + '</td><td>' + esc(u.name || '—') + '</td>' +
+    '<tr' + (u.is_test ? ' class="testrow"' : '') + '><td>' + u.id + '</td><td>' + esc(u.email) + (u.is_test ? ' <span class="pill test">test</span>' : '') +
+      (u.is_admin ? ' <span class="pill ok">admin</span>' : '') + '</td><td>' + esc(u.name || '—') + '</td>' +
     '<td>' + (u.is_active ? '<span class="pill ok">yes</span>' : '<span class="pill bad">no</span>') + '</td>' +
     '<td><span class="pill ' + (u.subscription_status === 'active' ? 'ok' : 'warn') + '">' + esc(u.subscription_status) + '</span></td>' +
     '<td>' + (u.campaign_count ?? 0) + '</td><td>' + fmt(u.last_login) + '</td></tr>').join('')
@@ -619,6 +633,13 @@ async function boot(){
   $('index').classList.remove('hidden');
   $('logout').classList.remove('hidden');
   $('who').textContent = me.email + (me.is_admin ? ' · admin' : ' · NOT admin');
+  if (!me.is_admin) {
+    // A logged-in non-admin used to see four empty sections and a 403 buried in one of them.
+    // Say it at the top: this is refused, not empty.
+    $('triage').innerHTML = '<div class="msg bad" style="grid-column:1/-1">' +
+      'Signed in as ' + esc(me.email) + ', which is not an admin account, so every figure here is refused by the server. ' +
+      'This is not an empty product — sign out and use an account marked admin in the Accounts table.</div>';
+  }
   refreshAll();
 }
 

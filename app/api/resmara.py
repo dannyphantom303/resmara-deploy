@@ -256,7 +256,7 @@ def admin_users(current_user=Depends(get_admin_user), db: Session = Depends(get_
     result = []
     for u in users:
         boost_count = db.query(Boost).filter(Boost.user_id == u.id).count()
-        result.append(AdminUserOut(id=u.id, email=u.email, name=u.name, is_active=u.is_active, subscription_status=u.subscription_status, last_login=u.last_login, created_at=u.created_at, campaign_count=boost_count, is_test=is_test_email(u.email)))
+        result.append(AdminUserOut(id=u.id, email=u.email, name=u.name, is_active=u.is_active, subscription_status=u.subscription_status, last_login=u.last_login, created_at=u.created_at, campaign_count=boost_count, is_test=is_test_email(u.email), is_admin=bool(u.is_admin)))
     return result
 
 @router.get("/admin/support", response_model=list[SupportTicketOut])

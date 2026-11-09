@@ -23,7 +23,7 @@ from sqlalchemy import Text, func, or_
 
 from app.core.config import settings
 from app.core.testdata import is_test_email
-from app.db.session import AdAccount, Asset, Boost, Event, Post, SupportTicket, User
+from app.db.session import AdAccount, Asset, Boost, Event, Order, Post, SupportTicket, User
 from app.services.ad_platforms import is_simulated_account
 
 # A ticket is still the operator's problem until it is resolved or closed; the old metric
@@ -351,6 +351,32 @@ def _advertising(db) -> Dict[str, Any]:
     }
 
 
+def _revenue(db) -> Dict[str, Any]:
+    """What was actually bought, in money. Empty until a Stripe key exists - and says so.
+
+    The console used to print "revenue is not measured" on a page whose product costs $49 a
+    campaign. The truth is narrower: the price is set, the order rows exist, and nothing can
+    be charged until STRIPE_SECRET_KEY is on the service.
+    """
+    from app.services.billing import price_cents, secret_key
+
+    orders = db.query(Order).all()
+    paid = [o for o in orders if (o.status or "") == "paid"]
+    paid_cents = sum(int(o.amount_cents or 0) for o in paid)
+    return {
+        "orders": len(orders),
+        "paid_orders": len(paid),
+        "pending_orders": len([o for o in orders if (o.status or "") == "pending"]),
+        "paid_cents": paid_cents,
+        "paid_usd": round(paid_cents / 100.0, 2),
+        "currency": (orders[0].currency if orders else "usd"),
+        "price_cents": price_cents(),
+        "price_usd": round(price_cents() / 100.0, 2),
+        "stripe_configured": bool(secret_key()),
+        "newest_at": _iso(max((o.created_at for o in orders if o.created_at), default=None)),
+    }
+
+
 def _activity_log(db, days: int = 14) -> Dict[str, Any]:
     """Event counts per day and per type - the closest thing to history this app keeps."""
     start = (_utcnow() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -376,6 +402,20 @@ def _activity_log(db, days: int = 14) -> Dict[str, Any]:
     }
 
 
+def stripe_ready() -> bool:
+    """Whether a purchase could actually be charged right now."""
+    from app.services.billing import secret_key
+
+    return bool(secret_key())
+
+
+def price_hint() -> int:
+    """The configured campaign price, read without importing a router."""
+    from app.services.billing import price_cents
+
+    return price_cents()
+
+
 def activity(db) -> Dict[str, Any]:
     """Everything the product is doing, grouped, with the unmeasurable named."""
     ad_spend_live = _platform_mode(db)["mode"] == "live"
@@ -399,6 +439,7 @@ def activity(db) -> Dict[str, Any]:
         "content": group("content", _content, test_ids),
         "support": group("support", _support, test_ids),
         "advertising": group("advertising", _advertising),
+        "revenue": group("revenue", _revenue),
         "activity": group("activity", _activity_log),
     }
     return {
@@ -412,10 +453,12 @@ def activity(db) -> Dict[str, Any]:
                 ("spend is only known once the ad platform's Insights API answers; open a "
                  "campaign report to pull it for a specific campaign"),
             },
+        ] + ([
             {
                 "metric": "revenue",
-                "reason": "no subscription or credit price is configured for this product",
-            },
-        ] + failures,
+                "reason": ("the price is $%.2f per campaign but no Stripe key is set, so nothing "
+                           "can be bought yet and no money has moved" % (price_hint() / 100.0)),
+            }
+        ] if not stripe_ready() else []) + failures,
         "generated_at": _iso(_utcnow()),
     }
