@@ -629,7 +629,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     r1_input = prompts.R1_PROPERTY_RESEARCH.format(address=address)
     research = await llm.responses_text(
         r1_input,
-        model=settings.OPENAI_MODEL_RESEARCH,
+        model=settings.research_model,
         reasoning_effort="low",
         tools=[{"type": "web_search"}],
     )
@@ -667,7 +667,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     )
     style = await llm.responses_text(
         r3_input,
-        model=settings.OPENAI_MODEL_RESEARCH,
+        model=settings.research_model,
         reasoning_effort="medium",
         tools=[{"type": "web_search"}],
     )
@@ -885,9 +885,9 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         "photos_used": rotated,
         "ad_id": ad_id,
         "model": {
-            "research": settings.OPENAI_MODEL_RESEARCH,
+            "research": settings.research_model,
             "brand": settings.OPENAI_MODEL_BRAND,
-            "style": settings.OPENAI_MODEL_RESEARCH,
+            "style": settings.research_model,
             "plan": settings.OPENAI_MODEL_PLAN,
         },
     }

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import ClassVar
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -61,6 +62,25 @@ class Settings(BaseSettings):
     TIKTOK_CLIENT_SECRET: str = os.getenv("TIKTOK_CLIENT_SECRET", "")
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+    # Models that must not be used for this workload, whatever the env says. glm-5.3 spent its
+    # entire output budget on the trace and returned empty content on the hosted endpoint, and
+    # it costs several times a flash model per call. Dan's rule: deepseek for anything that
+    # needs AI. A stale env var must not quietly put it back.
+    RETIRED_MODELS: ClassVar[tuple] = ("glm",)
+
+    @property
+    def research_model(self) -> str:
+        """The model for research, style and the supporting plan calls.
+
+        Falls back to the plan model when the configured name is empty or retired, so the
+        engine builds with the model that is proven to answer, instead of the one that is
+        merely configured.
+        """
+        name = (self.OPENAI_MODEL_RESEARCH or "").strip()
+        if not name or name.lower().startswith(self.RETIRED_MODELS):
+            return (self.OPENAI_MODEL_PLAN or "").strip() or name
+        return name
 
     @property
     def graph_base(self) -> str:

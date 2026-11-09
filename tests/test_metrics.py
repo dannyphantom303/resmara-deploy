@@ -247,6 +247,17 @@ def main():
     check("the no-plan rule compares the JSON column as text",
           "CAST(boosts.plan AS TEXT)" in pg_sql, pg_sql)
 
+    print("\n[the retired research model cannot sneak back in]")
+    from app.core.config import Settings as _S
+    # The field defaults are read from os.environ when config is imported, so pass the values
+    # in rather than mutating the environment after the fact.
+    retired = _S(OPENAI_MODEL_RESEARCH="glm-5.3", OPENAI_MODEL_PLAN="deepseek-v4.1-flash")
+    check("a glm research model falls back to the plan model",
+          retired.research_model == "deepseek-v4.1-flash", retired.research_model)
+    allowed = _S(OPENAI_MODEL_RESEARCH="deepseek-v4.1-flash", OPENAI_MODEL_PLAN="deepseek-v4.1-flash")
+    check("an allowed model is used as configured",
+          allowed.research_model == "deepseek-v4.1-flash", allowed.research_model)
+
     print("\n[a broken section does not blank the others]")
     import app.services.metrics as MM
     original = MM._campaigns

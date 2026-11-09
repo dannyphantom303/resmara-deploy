@@ -131,7 +131,7 @@ def _ai_mode() -> Dict[str, str]:
         return {"mode": "offline",
                 "note": "no OPENAI_API_KEY is configured, so the engine answers from its fixtures"}
     return {"mode": "live",
-            "note": f"generating with {settings.OPENAI_MODEL_RESEARCH} / {settings.OPENAI_MODEL_PLAN}"}
+            "note": f"generating with {settings.research_model} / {settings.OPENAI_MODEL_PLAN}"}
 
 
 def _live_accounts(db):
