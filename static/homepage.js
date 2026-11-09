@@ -5,7 +5,7 @@ function home(){
  ${siteNav("home")}
  <main>
  <section class="home-hero">
-  <div class="home-hero-copy"><h1>More eyes on<br> your listing.<br><span>More time for<br> your clients.</span></h1><p>Let Resmara take the marketing off your plate. A branded 14-day campaign, digital ads and seller-ready reports—with one credit per property.</p><div class="home-actions"><button class="home-primary" onclick="newCampaign()">Let’s get started ↗</button></div></div>
+  <div class="home-hero-copy"><h1>More eyes on<br> your listing.<br><span>More time for<br> your clients.</span></h1><p>Let Resmara take the marketing off your plate. A branded 14-day campaign, digital ads and seller-ready reports for one property — $49, no subscription.</p><div class="home-actions"><button class="home-primary" onclick="newCampaign()">Let’s get started ↗</button></div></div>
   <div class="home-visual"><div class="home-hello"><b>Hi, I’m Resmara.</b><span>Your Real Estate Social Marketing, Analytics &amp; Reporting Assistant.</span></div>${homeWorld()}</div>
  </section>
  <section class="home-goal home-section"><div><span class="home-kicker">MAKE THE FIRST IMPRESSION COUNT</span><h2>Your first 14 days.<br><span>Make them count.</span></h2><p>Your listing is new. Buyers are looking. This is the window to build attention—not spend days getting the marketing ready.</p><p>Week one introduces the home. Week two keeps it in the conversation. Daily social posts keep it showing up, while digital ads help it reach beyond your followers.</p></div><div class="home-fortnight"><span>YOUR LAUNCH WINDOW</span><b>14<span>days to build momentum.</span></b><div class="home-window-line"><i>Launch</i><i>Day 7</i><i>Day 14</i></div><p><strong>Week 1 · Make an entrance.</strong><br>Introduce the home and get it seen.</p><p><strong>Week 2 · Keep showing up.</strong><br>Build on that attention with daily posts and ads.</p></div></section>
@@ -15,7 +15,7 @@ function home(){
  </section>
  <section class="home-section home-samples"><div class="home-section-heading"><div><span class="home-kicker">YOUR BRAND IS THE BRIEF</span><h2>Your brand.<br><span>Down to the details.</span></h2></div><p>Resmara researches your website, brokerage and brand. Your colours, fonts, tone and visual style become a brand profile you can review—then that profile guides every post, caption and ad.</p></div><div class="home-sample-layout"><div class="home-brand-profile"><span class="home-kicker">BRAND PROFILE PREVIEW</span><div class="home-brand-name"><span>M</span><div><b>Morgan &amp; Co.</b><small>Property advisors</small></div></div><div class="home-brand-field"><small>YOUR COLOURS</small><div class="home-brand-swatches"><i style="background:#143a50"></i><i style="background:#d8c8ac"></i><i style="background:#f5f2eb"></i></div></div><div class="home-brand-field"><small>YOUR TYPOGRAPHY</small><b class="home-brand-type">A place to call home.</b><span>Editorial headlines. Clean, readable copy.</span></div><div class="home-brand-field"><small>YOUR VOICE</small><b>Warm. Assured. Property-focused.</b><span>Your personality, carried into every caption.</span></div><p>Brokerage identity. Personal brand. One consistent look.</p></div><div class="home-brand-creative"><div class="sample-tabs" role="tablist" aria-label="Branded creative previews"><button role="tab" id="tab-social" aria-selected="true" aria-controls="sample-output" onclick="sampleOutput('social')">Social post</button><button role="tab" id="tab-ad" aria-selected="false" aria-controls="sample-output" onclick="sampleOutput('ad')">Digital ad</button></div><div id="sample-output" role="tabpanel" aria-labelledby="tab-social"></div></div></div></section>
  <section class="home-results"><div class="home-section home-results-layout"><div><span class="home-kicker">CLEAR RESULTS. BETTER CONVERSATIONS.</span><h2>Go back to your<br><span>seller with confidence.</span></h2><p>Know what your marketing delivered. Your day 7 and day 14 reports give you the numbers to make informed decisions with your client.</p><div class="home-report-moments"><div><span>07</span><div><h3>A confident check-in.</h3><p>At day 7, share the exposure, engagement and listing activity so far.</p></div></div><div><span>14</span><div><h3>A clear way forward.</h3><p>At day 14, review the full campaign together and decide what comes next.</p></div></div></div></div><div class="home-seller-preview"><div class="home-report-switch" role="tablist" aria-label="Seller report previews"><button role="tab" id="seller-tab-7" aria-selected="true" aria-controls="home-report-preview" onclick="homeSellerReport(7)">Day 7</button><button role="tab" id="seller-tab-14" aria-selected="false" aria-controls="home-report-preview" onclick="homeSellerReport(14)">Day 14</button></div><div id="home-report-preview" role="tabpanel" aria-labelledby="seller-tab-7"></div></div></div></section>
- <section class="home-section home-price" id="home-pricing"><div><span class="home-kicker">DONE FOR YOU. ON YOUR TERMS.</span><h2>All that.<br>One credit per listing.<br><span>No subscription.</span></h2><p>Your campaign, creative, publishing and seller reports, wrapped into one credit per property. Buy credits when you need them, with no monthly commitment.</p></div><div class="home-price-detail"><h3>Your listing launch includes</h3><ul><li>A branded 14-day social campaign</li><li>Digital ad creative and campaign setup</li><li>Your calendar, review and approval</li><li>Scheduled social publishing</li><li>Day 7 and day 14 seller reports</li></ul><p>You choose the ad budget. Meta ad spend is separate from your credits.</p><button class="home-primary" onclick="pricing()">See credit pricing ↗</button></div></section>
+ <section class="home-section home-price" id="home-pricing"><div><span class="home-kicker">DONE FOR YOU. ON YOUR TERMS.</span><h2>All that.<br>$49 per campaign.<br><span>No subscription.</span></h2><p>One property, one campaign, one price: the creative, the calendar, the publishing and the seller reports. You pay when the campaign is built, and nothing renews.</p></div><div class="home-price-detail"><h3>Your listing launch includes</h3><ul><li>A branded 14-day social campaign</li><li>Digital ad creative and campaign setup</li><li>Your calendar, review and approval</li><li>Scheduled social publishing</li><li>Day 7 and day 14 seller reports</li></ul><p>You choose the ad budget. Meta ad spend is separate and goes to your own ad account.</p><button class="home-primary" onclick="pricing()">See what the $49 buys ↗</button></div></section>
  <section class="home-finish"><span class="home-mini-robot" aria-hidden="true"></span><h2>Let’s give your next listing<br>a proper launch.</h2><button class="home-primary" onclick="newCampaign()">Let’s get started ↗</button></section>
  </main><footer class="home-footer">${logo}<span>Your expertise. Superpowered.</span><a href="#how-it-works" onclick="howItWorks();return false">How it works ↗</a></footer></div>`;
  homeCalendarState={start:new Date('2026-11-02T12:00:00'),month:new Date('2026-11-01T12:00:00'),selected:0};renderHomeMonth();homeSellerReport(7);if(window.sampleOutput)sampleOutput('social');
@@ -201,7 +201,7 @@ function runMetaAudit(scenario){
 function showMetaResult(){
  const ready=state.metaAudit?.status==='ready';
  if(ready){
- show(`<span class="robot-avatar" aria-hidden="true"></span><span class="eyebrow">DEMO CHECK COMPLETE</span><h2>Congratulations, you’re ready to run your first campaign.</h2><p>In this scenario your Business Portfolio, Page access and ad account passed the check.</p><div class="check">1. Add your listing and media, then use one credit to start.</div><div class="check">2. Review the branded draft and approve it.</div><div class="check">3. Approve your campaign when you’re ready to launch.</div><div class="modal-actions"><button class="alt" onclick="finishWorkspaceTour()">Skip for now</button><button onclick="workspaceTour(0)">Show me my dashboard →</button></div>`);return
+ show(`<span class="robot-avatar" aria-hidden="true"></span><span class="eyebrow">DEMO CHECK COMPLETE</span><h2>Congratulations, you’re ready to run your first campaign.</h2><p>In this scenario your Business Portfolio, Page access and ad account passed the check.</p><div class="check">1. Add your listing and media, then start the campaign for $49.</div><div class="check">2. Review the branded draft and approve it.</div><div class="check">3. Approve your campaign when you’re ready to launch.</div><div class="modal-actions"><button class="alt" onclick="finishWorkspaceTour()">Skip for now</button><button onclick="workspaceTour(0)">Show me my dashboard →</button></div>`);return
  }
  show(`<span class="eyebrow">DEMO CHECK · ACTION NEEDED</span><h2>Your ad account needs attention.</h2><p>You can still build a draft. Launch stays on hold until the account passes the check.</p><div class="check">✓ Business Portfolio and Facebook Page found in this scenario.</div><div class="notice"><strong>Ad account access needs to be granted.</strong><br>In Meta Business Settings, select the ad account and confirm your profile has permission to manage campaigns. Then reconnect and check again.</div><p>Want a hand? Try booking a setup session with Adam. No meeting or invitation will be created.</p><div class="modal-actions"><button class="alt" onclick="onboard(1)">Reconnect and recheck</button><button class="alt" onclick="mockHelpBooking()">Try booking help →</button><button onclick="newCampaign()">Build a draft anyway →</button></div>`);
 }
@@ -214,10 +214,10 @@ function launchOrder(){
  if(!live&&state.metaAudit?.status!=='ready'){show(`<h2>Check your Meta setup first.</h2><p>Your draft is saved. Complete a readiness check before proceeding to launch.</p><button onclick="onboard(1)">Check Meta setup →</button>`);return}
  if(!activeReview()?.approved)return;
  if(live){
-  show(`<span class="eyebrow">LAUNCH PREVIEW</span><h2>Ready to launch your property?</h2><div class="check">One property · 14-day campaign · Approved</div><p>Ad spend is billed to your own connected ad account. No campaign credit is used at launch. The campaign is created paused, and you activate it in Meta Ads Manager.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to your campaign</button><button class="campaign-primary" onclick="launchCampaignViaApi()">Launch on Meta →</button></div>`);
+  show(`<span class="eyebrow">LAUNCH PREVIEW</span><h2>Ready to launch your property?</h2><div class="check">One property · 14-day campaign · Approved</div><p>Ad spend is billed to your own connected ad account. Nothing further is charged at launch. The campaign is created paused, and you activate it in Meta Ads Manager.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to your campaign</button><button class="campaign-primary" onclick="launchCampaignViaApi()">Launch on Meta →</button></div>`);
   return;
  }
- show(`<span class="eyebrow">LAUNCH PREVIEW</span><h2>Ready to launch your property?</h2><div class="check">One property · 14-day campaign · Approved</div><p>Meta ad spend is separate. No additional credit is used at launch. Publishing is not connected in this demo.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to your campaign</button>${reviewCampaignBoostId()!=null?'<button class="campaign-primary" onclick="launchCampaignViaApi()">Launch on Meta →</button>':''}</div>`);
+ show(`<span class="eyebrow">LAUNCH PREVIEW</span><h2>Ready to launch your property?</h2><div class="check">One property · 14-day campaign · Approved</div><p>Meta ad spend is separate. Nothing further is charged at launch. Publishing is not connected in this demo.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to your campaign</button>${reviewCampaignBoostId()!=null?'<button class="campaign-primary" onclick="launchCampaignViaApi()">Launch on Meta →</button>':''}</div>`);
 }
 
 function mockHelpBooking(){
@@ -228,73 +228,23 @@ function confirmMockHelp(slot){
  show(`<span class="eyebrow">DEMO BOOKING CONFIRMED</span><h2>Your setup session preview</h2><div class="check">${esc(slot)} · Adam · Meta setup</div><p>No real meeting was booked. After the permissions are fixed, return here to reconnect and check again.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Close</button><button onclick="onboard(1)">Reconnect and recheck →</button></div>`);
 }
 
-function creditQuote(quantity){
- const count=Number(quantity);
- if(!Number.isInteger(count)||count<1||count>100||(count!==1&&count%5!==0))return null;
- const unit=count>=100?3900:count>=50?4199:4999;
- return {count,unit,total:count*unit,savings:count*(4999-unit)};
-}
-function creditMoney(cents){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100)}
-function usableCreditPacks(now=Date.now()){
- return (state.creditPacks||[]).filter(pack=>pack.remaining>0&&Date.parse(pack.expiresAt)>now);
-}
-function creditBalance(){return usableCreditPacks().reduce((sum,pack)=>sum+pack.remaining,0)}
-function useCampaignCredit(){
- const pack=usableCreditPacks().sort((a,b)=>Date.parse(a.expiresAt)-Date.parse(b.expiresAt))[0];
- if(!pack)return false;
- pack.remaining--;return true;
-}
 function pricing(){
  if(typeof stopResmaraGuide==='function')stopResmaraGuide();
- location.hash='pricing';document.title='Credit Pricing — Resmara';
- app.innerHTML=`<div class="marketing-home">${siteNav('pricing')}<main><section class="home-section package-page"><div><span class="home-kicker">PAY AS YOU GO</span><h1>Credits for<br><span>your next listings.</span></h1><p>One credit builds one 14-day listing campaign, with branded posts, digital ad creative and Day 7 and Day 14 seller reports.</p><p>Buy one credit or a pack of five or more. Use them as listings come in, within 12 months of purchase. No subscription or automatic renewal. Meta ad spend is separate.</p></div>${creditCalculator(false,true)}</section></main><footer class="home-footer">${logo}<span>Your expertise. Superpowered.</span></footer></div>`;
- updateCreditQuote(document.querySelector('.credit-calculator'));window.scrollTo(0,0)
+ location.hash='pricing';document.title='Pricing — Resmara';
+ app.innerHTML=`<div class="marketing-home">${siteNav('pricing')}<main><section class="home-section package-page"><div><span class="home-kicker">$49 PER CAMPAIGN</span><h1>One listing.<br><span>One campaign.</span><br>Forty-nine dollars.</h1><p>A 14-day branded campaign for one property: the creative, the calendar, the publishing and the day 7 and day 14 seller reports.</p><p>No subscription, no packs, nothing to top up. You pay the $49 when the campaign is ready to build, through Stripe Checkout. Meta ad spend is separate and goes to your own ad account.</p><p class="fine">Preparing a campaign — the scope, the captions, the calendar — costs nothing. You only pay to build it.</p></div><div class="home-price-detail"><h3>What the $49 buys</h3><ul><li>A 14-day social campaign for that listing</li><li>Caption and photo pairings from your own gallery</li><li>Digital ad creative and campaign setup</li><li>Your calendar, review and approval</li><li>Scheduled social publishing</li><li>Day 7 and day 14 seller reports</li></ul><button class="home-primary" onclick="newCampaign()">Start a campaign ↗</button></div></section></main><footer class="home-footer">${logo}<span>Your expertise. Superpowered.</span></footer></div>`;
+ window.scrollTo(0,0);
 }
-function creditSliderQuantity(index){return Number(index)===0?1:Number(index)*5}
-function creditCalculator(resume,estimateOnly=false){
- return `<form class="home-price-detail credit-calculator" oninput="updateCreditQuote(this)" onsubmit="event.preventDefault();${estimateOnly?'':'reviewCreditOrder(creditSliderQuantity(this.elements.quantity.value),'+resume+')'}"><h2>Choose your credits</h2><label class="field">Number of credits <output data-credit-count></output><input name="quantity" type="range" min="0" max="20" step="1" value="${resume?0:2}"></label><div class="credit-presets">${[1,5,10,50,100].map(n=>`<button type="button" class="alt" onclick="this.form.elements.quantity.value=${n===1?0:n/5};updateCreditQuote(this.form)">${n}</button>`).join('')}</div><div class="credit-quote" aria-live="polite"><strong data-credit-total></strong><span data-credit-unit></span><span data-credit-saving></span></div>${estimateOnly?'<p class="fine">Purchase credits from My Credits in your dashboard.</p>':'<button class="home-primary" data-credit-buy>Buy credits ↗</button><p class="fine">Demo checkout · no charge</p>'}</form>`;
-}
-function updateCreditQuote(form){
- if(!form)return;const quote=creditQuote(creditSliderQuantity(form.elements.quantity.value));if(!quote)return;
- form.elements.quantity.setAttribute('aria-valuetext',quote.count+' credits');
- form.querySelector('[data-credit-count]').textContent=quote.count;
- form.querySelector('[data-credit-total]').textContent=creditMoney(quote.total);
- form.querySelector('[data-credit-unit]').textContent=creditMoney(quote.unit)+' per credit · '+quote.count+' listings';
- form.querySelector('[data-credit-saving]').textContent=quote.savings?'Save '+creditMoney(quote.savings)+' compared with $49.99 per credit.':'50+ credits unlock volume pricing.';
- const buy=form.querySelector('[data-credit-buy]');if(buy)buy.textContent='Buy '+quote.count+' credits ↗';
-}
-function buyCreditsForDraft(){show(creditCalculator(true));updateCreditQuote(modal.querySelector('.credit-calculator'))}
-function reviewCreditOrder(quantity,resume=false){
- if(!state.clientSignedIn){clientAccess();return}
- const quote=creditQuote(quantity);if(!quote)return;
- show(`<h2>Review your credit purchase</h2><div class="check">${quote.count} credits · ${creditMoney(quote.unit)} each · <strong>${creditMoney(quote.total)}</strong></div><p>Credits expire 12 months after purchase. Meta ad spend is separate.</p><p class="notice checkout-notice">Demo checkout. No card details or payment are collected.</p><div class="modal-actions"><button class="alt" onclick="${resume?'buyCreditsForDraft()':'modal.close()'}">Back</button><button class="campaign-primary" onclick="completeDemoCreditOrder(this,${quote.count},${resume})">Add demo credits →</button></div>`);
-}
-function completeDemoCreditOrder(button,quantity,resume){
- const quote=creditQuote(quantity);if(button.disabled||!quote||!state.clientSignedIn)return;
- button.disabled=true;const now=new Date(),expires=new Date(now);expires.setFullYear(expires.getFullYear()+1);
- (state.creditPacks ||= []).push({remaining:quote.count,purchasedAt:now.toISOString(),expiresAt:expires.toISOString()});
- persist();if(resume){reviewDraft();return}
- modal.close();dashboard('credits');toast(quote.count+' demo credits added.');
-}
-
-function myCredits(){
- const packs=state.creditPacks||[],available=creditBalance();
- const date=value=>new Date(value).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
- $('#content').innerHTML=`<div class="welcome"><h1>My Credits</h1><p>One credit builds one property campaign. Meta ad spend is separate.</p></div><section class="panel"><h2>${available} ${available===1?'credit':'credits'} available</h2><p>Credits can be used for 12 months after purchase. The soonest-expiring credit is used first.</p>${packs.length?`<ul class="campaign-report-list">${[...packs].reverse().map(pack=>`<li><strong>${pack.remaining} unused</strong><span class="fine">${Date.parse(pack.expiresAt)<=Date.now()?'Expired':'Expires'} ${esc(date(pack.expiresAt))}</span></li>`).join('')}</ul>`:'<p class="fine">No credit purchases yet.</p>'}</section>${creditCalculator(false)}`;
- updateCreditQuote(document.querySelector('.credit-calculator'));
-}
-
 let workspaceTourCleanup;
 function workspaceTour(step=0){
  workspaceTourCleanup?.();
  if(modal.open)modal.close();
  const steps=[
   ['My Campaigns','This is where all your properties live. Open any campaign to see its scope, calendar and seller reports.','.welcome h1','campaigns'],
-  ['Add a campaign','Use this button to add the property address, listing link and media. Checkout shows your credit balance.','.welcome [onclick="newCampaign()"]','campaigns'],
+  ['Add a campaign','Use this button to add the property address, listing link and media. The $49 is charged only when the campaign is built.','.welcome [onclick="newCampaign()"]','campaigns'],
   ['Property Scope','Resmara fills in the property brief. Check the facts and pick a go-live date. Approving the scope starts the campaign build.','.campaign-scope summary','example'],
   ['Campaign Calendar','The posts and ads appear here when the build is done. Open any item to edit it, then approve the calendar.','.review-calendar summary','example'],
   ['Approve the campaign','Once the scope and calendar are approved, you can approve the full campaign here.','.review-approval h2','example'],
-  ['My Credits','Check your balance or buy more credits here. One credit builds one property campaign.','.welcome h1','credits']
+  ['Billing','Every campaign purchase and its status lives here. One campaign is $49.','.welcome h1','credits']
  ];
  const [title,description,selector,page]=steps[step];
  dashboard(page==='example'?'campaigns':page);

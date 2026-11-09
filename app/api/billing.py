@@ -178,8 +178,11 @@ def my_orders(current_user: User = Depends(get_current_user), db: Session = Depe
     if not current_user.is_admin:
         q = q.filter(Order.user_id == current_user.id)
     rows = q.order_by(Order.id.desc()).limit(50).all()
+    addresses = {b.id: b.address for b in db.query(Boost).filter(
+        Boost.id.in_([o.boost_id for o in rows if o.boost_id])).all()} if rows else {}
     return [{
-        "id": o.id, "boost_id": o.boost_id, "status": o.status,
+        "id": o.id, "boost_id": o.boost_id,
+        "address": addresses.get(o.boost_id), "status": o.status,
         "amount_cents": o.amount_cents, "amount_label": billing.price_label(o.amount_cents or 0),
         "currency": o.currency, "session_id": o.stripe_session_id,
         "created_at": o.created_at, "paid_at": o.paid_at,

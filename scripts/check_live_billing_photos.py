@@ -97,8 +97,13 @@ def main():
             "listing_url": "https://www.trulia.com/home/1354-harpole-rd-redding-ca-96002-15218243",
         })
         zbody = zillow.json() if zillow.status_code < 300 else {}
-        check("a Trulia listing link imports directly",
-              zillow.status_code in (200, 201) and zbody.get("imported", 0) > 0, zillow.text[:300])
+        # A second import of the same property legitimately finds nothing new (dedupe by
+        # photo URL), so "already imported" is a pass, not a failure.
+        already = all("already imported" in json.dumps(s) for s in (zbody.get("skipped") or [])[:1]) \
+            and bool(zbody.get("skipped"))
+        check("a second listing link is either imported or recognised as already here",
+              zillow.status_code in (200, 201) and (zbody.get("imported", 0) > 0 or already),
+              zillow.text[:300])
         if zbody.get("imported", 0) == 0:
             print("     tried:", json.dumps(zbody.get("tried") or []))
 

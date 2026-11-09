@@ -271,7 +271,7 @@ async function startCampaignScope(button){
   if(state===account&&state.clientSignedIn&&modal.open&&progress?.isConnected)saveDraft({...submitted,creditUsed:1,scopeFirst:true,liveGeneration:true,boostId:boost.id,adAccountId:adAccountId||undefined});
  }catch(error){
   if(state===account&&modal.open&&progress?.isConnected){
-   show(`<h2>We could not set up the campaign</h2><p>${esc(error.message)}</p><p>No campaign credit was used and nothing was saved.</p><button class="alt" onclick="reviewDraft()">Try again</button>`);
+   show(`<h2>We could not set up the campaign</h2><p>${esc(error.message)}</p><p>Nothing was charged and nothing was saved.</p><button class="alt" onclick="reviewDraft()">Try again</button>`);
   }
  }
 }

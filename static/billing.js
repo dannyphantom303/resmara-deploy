@@ -98,24 +98,35 @@ function pricing() {
 
 async function myCredits() {
   // Same route the sidebar has always used ('credits'); the page is now Billing.
+  // The shell paints first: an await before innerHTML leaves the previous screen on the page
+  // when the network is slow, which on a free instance is most of the time.
+  $('#content').innerHTML = `<div class="welcome"><h1>Billing</h1>
+      <p>One property campaign costs ${billingMoney(BILLING_PRICE_CENTS)}, paid when you build it.
+      No subscription and nothing to top up.</p></div>
+    <section class="panel"><h2>Purchases</h2>
+      <div id="billing-orders"><p class="fine">Loading your purchases…</p></div></section>
+    <section class="panel"><h2>How it works</h2>
+      <p>You pay ${billingMoney(BILLING_PRICE_CENTS)} when you build a campaign. Card details go to
+      Stripe; Resmara never stores them. Meta ad spend is separate and paid to Meta from your own
+      ad account.</p></section>`;
+
+  var box = document.getElementById('billing-orders');
+  if (!box) return;
   var rows = [];
-  try { rows = (await RM.orders()) || []; } catch (err) { rows = []; }
+  try { rows = (await RM.orders()) || []; } catch (err) {
+    box.innerHTML = '<p class="fine">Could not load your purchases. Check your connection and reload.</p>';
+    return;
+  }
   var date = function (v) {
     return v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
   };
-  $('#content').innerHTML = `<div class="welcome"><h1>Billing</h1>
-      <p>One property campaign costs ${billingMoney(BILLING_PRICE_CENTS)}. No subscription.</p></div>
-    <section class="panel"><h2>Purchases</h2>
-      ${rows.length ? `<ul class="campaign-report-list">${rows.map(function (o) {
-        return `<li><strong>${esc(o.amount_label || billingMoney(o.amount_cents))}${o.boost_id ? ' · campaign #' + esc(String(o.boost_id)) : ''}</strong>
-          <span class="fine">${esc(o.status)} · ${date(o.paid_at || o.created_at)}</span></li>`;
+  box.innerHTML = rows.length
+    ? `<ul class="campaign-report-list">${rows.map(function (o) {
+        var what = o.address || (o.boost_id ? 'Campaign #' + o.boost_id : 'Campaign');
+        return `<li><strong>${esc(what)}</strong>
+          <span class="fine">${esc(o.amount_label || billingMoney(o.amount_cents))} · ${esc(o.status)} · ${date(o.paid_at || o.created_at)}</span></li>`;
       }).join('')}</ul>`
-      : '<p class="fine">No purchases yet. A campaign is charged when you build it.</p>'}
-    </section>
-    <section class="panel"><h2>How it works</h2>
-      <p>You pay ${billingMoney(BILLING_PRICE_CENTS)} when you build a campaign. Card details go to
-      Stripe; Resmara never stores them. Meta ad spend is separate and paid to Meta.</p></section>
-    ${creditCalculator(false)}`;
+    : '<p class="fine">No purchases yet. A campaign is charged when you build it.</p>';
 }
 
 // ---- returning from Stripe ------------------------------------------------
