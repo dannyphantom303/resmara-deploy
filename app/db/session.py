@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func, JSON, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func, JSON, LargeBinary, Date
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from app.db.urls import normalize_database_url
@@ -238,6 +238,42 @@ class Event(Base):
     boost_id = Column(Integer, nullable=True)
     event_type = Column(String, nullable=False)
     payload = Column(JSON, default={})
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- Start-up costs (what it cost to get here, who paid, and what repeats) ---
+# Until the business has its own bank account, the project's costs are paid out of
+# personal cards. This is the ledger for that: one row per thing bought, who fronted it,
+# and — for a subscription — the cadence, so the monthly burn keeps counting instead of
+# being retyped every month. Receipts live in their own table and are served only to an
+# admin, because a receipt image carries the last four digits of somebody's card.
+class Cost(Base):
+    __tablename__ = "costs"
+    id = Column(Integer, primary_key=True, index=True)
+    paid_on = Column(Date, nullable=False)
+    paid_by = Column(String(120), nullable=False)
+    vendor = Column(String(160), nullable=False)
+    description = Column(Text, nullable=True)
+    amount_cents = Column(Integer, nullable=False)
+    currency = Column(String(8), default="usd")
+    kind = Column(String(16), nullable=False, default="one_off")   # one_off | recurring
+    cadence = Column(String(16), nullable=True)                    # monthly | yearly
+    started_on = Column(Date, nullable=True)                       # recurring: first charge
+    ended_on = Column(Date, nullable=True)                         # recurring: cancelled
+    notes = Column(Text, nullable=True)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CostReceipt(Base):
+    __tablename__ = "cost_receipts"
+    id = Column(Integer, primary_key=True, index=True)
+    cost_id = Column(Integer, ForeignKey("costs.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    original_name = Column(String(255), nullable=True)
+    content_type = Column(String(80), nullable=True)
+    size = Column(Integer, nullable=True)
+    data = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 Base.metadata.create_all(bind=engine)

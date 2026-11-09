@@ -99,6 +99,7 @@ details.card[open]>summary{border-bottom:0}
 .stat .n{font-size:26px;font-weight:700;line-height:1.12;letter-spacing:-.9px;color:var(--ink)}
 .stat .l{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin-top:2px}
 .stat .s{font-size:11px;color:#7c93a3;margin-top:3px;line-height:1.45}
+.nw{white-space:nowrap}
 .stat .w{font-size:11.5px;color:#5b7f96;margin-top:6px;line-height:1.45;border-top:1px solid var(--hair);padding-top:6px}
 .tile .w{font-size:11.5px;color:#5b7f96;margin-top:5px;line-height:1.4;font-weight:500}
 .stat.wide .n{font-size:22px;font-weight:700;letter-spacing:-.7px;line-height:1.2}
@@ -221,6 +222,7 @@ tr.testrow td{background:#fbfdff;color:#849bae}
       <a href="#sec-support" data-go="support">Support</a>
       <a href="#sec-content" data-go="content">Content</a>
       <a href="#sec-campaigns" data-go="campaigns">Campaigns</a>
+      <a href="#sec-costs" data-go="costs">Start-up costs</a>
       <a href="#sec-users" data-go="users">Accounts</a>
       <a href="#sec-advertising" data-go="advertising">Connections</a>
       <a href="#sec-activity" data-go="activity">Activity</a>
@@ -292,6 +294,39 @@ tr.testrow td{background:#fbfdff;color:#849bae}
     <details class="card sec" data-sec="campaigns" id="sec-campaigns">
       <summary><h2>Campaigns</h2><span class="secsum" id="sum-campaigns">…</span><span class="chev">›</span></summary>
       <div class="body" id="campaignsBody"></div>
+    </details>
+
+    <details class="card sec" data-sec="costs" id="sec-costs">
+      <summary><h2>Start-up costs</h2><span class="secsum" id="sum-costs">…</span><span class="chev">›</span></summary>
+      <div class="body">
+        <div class="hint" style="margin:0 0 12px">What this project has cost so far, who put the money down, and what keeps charging every month. Nothing here is customer revenue — that is the Money band above.</div>
+        <div id="costSquares"><div class="hint">Reading the ledger…</div></div>
+
+        <h3 style="margin:18px 0 8px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--blue)">Add a cost</h3>
+        <div class="row" id="costForm">
+          <div style="flex:0 0 140px"><label for="cDate">Paid on</label><input type="date" id="cDate"></div>
+          <div style="flex:1 1 150px"><label for="cPayer">Who paid</label><input id="cPayer" placeholder="Dan"></div>
+          <div style="flex:1 1 170px"><label for="cVendor">Paid to</label><input id="cVendor" placeholder="Render, Namecheap, Stripe…"></div>
+          <div style="flex:2 1 210px"><label for="cWhat">What for</label><input id="cWhat" placeholder="Web service, August"></div>
+          <div style="flex:0 0 120px"><label for="cAmount">Amount</label><input id="cAmount" inputmode="decimal" placeholder="49.00"></div>
+          <div style="flex:0 0 150px"><label for="cKind">One-off or repeats</label>
+            <select id="cKind">
+              <option value="one_off">One-off</option>
+              <option value="recurring">Repeats</option>
+            </select></div>
+          <div style="flex:0 0 130px;display:none" id="cCadenceWrap"><label for="cCadence">How often</label>
+            <select id="cCadence"><option value="monthly">Every month</option><option value="yearly">Every year</option></select></div>
+          <div style="flex:0 0 auto"><label for="cReceipt">Receipt (photo or PDF)</label><input type="file" id="cReceipt" accept="image/*,application/pdf"></div>
+          <div style="flex:0 0 auto"><button id="cAdd">Add it</button></div>
+        </div>
+        <div class="msg" id="costMsg" style="margin-top:8px"></div>
+
+        <div class="scrollx" style="margin-top:16px"><table id="costsTable">
+          <thead><tr><th>paid on</th><th>who paid</th><th>paid to</th><th>what for</th><th>amount</th><th>repeats</th><th>charged so far</th><th>next</th><th>receipt</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="hint" style="margin-top:8px">A repeating cost counts itself once per month (or year) from the day it started. Ending one stops the clock and keeps what it already cost.</div>
+      </div>
     </details>
 
     <details class="card sec" data-sec="users" id="sec-users">
@@ -442,6 +477,12 @@ const WHY = {
   'need reconnect': 'Meta rejected the token; this account cannot publish.',
   'token state (last sweep)': 'What the last health sweep got back from Meta.',
   'platforms': 'Ad platforms this workspace has an account on.',
+  'spent so far': 'One-off purchases plus every subscription charge that has already happened.',
+  'monthly repeated': 'What the subscriptions cost every month, yearly ones divided by twelve.',
+  'one-off purchases': 'Things bought once: domains, design, hardware.',
+  'subscriptions running': 'Repeating costs with no end date. Ended ones stop counting.',
+  'next renewal': 'The soonest subscription charge still to come.',
+  'receipts on file': 'Costs with a photo or PDF attached. The rest have none yet.',
   // the work queue reads from the same dictionary
   'Waiting on us': 'A client wrote in and nobody has answered yet.',
   'Posts need us': 'Approved and due now, or Meta refused them.',
@@ -814,7 +855,202 @@ async function boot(){
   refreshAll();
 }
 
-function refreshAll(){ loadHealth(); loadMetrics(); loadUsers(); loadTickets(); }
+
+// ── start-up costs ────────────────────────────────────────────────────────────────
+// What the project has cost, who paid, and what repeats. A receipt is fetched with the
+// operator's own token and handed to the browser as a blob: a plain link would 403,
+// because the ledger's receipts are not public files.
+let costRows = [], costSummary = null;
+
+function usd(n){
+  const v = Number(n || 0);
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function costNote(text, ok){
+  const m = $('costMsg'); if (!m) return;
+  m.className = 'msg ' + (ok ? 'ok' : 'bad');
+  m.textContent = text;
+  clearTimeout(costNote._t);
+  costNote._t = setTimeout(() => { m.textContent = ''; m.className = 'msg'; }, 6000);
+}
+
+async function loadCosts(){
+  try {
+    const d = await api('/api/admin/costs');
+    costRows = d.items || [];
+    costSummary = d.summary || {};
+    renderCosts();
+  } catch (err) {
+    costSummary = null;
+    const sq = $('costSquares');
+    if (sq) sq.innerHTML = '<div class="bad">Could not read the cost ledger — ' + esc(err.message) + '</div>';
+    const s = $('sum-costs'); if (s) s.textContent = 'unavailable';
+  }
+}
+
+function renderCosts(){
+  const s = costSummary || {};
+  const sq = $('costSquares'); if (!sq) return;
+  const payers = Object.keys(s.by_payer_usd || {});
+  sq.innerHTML = '<div class="grid">' +
+    stat(usd(s.spent_to_date_usd), 'spent so far', 'wide',
+         (s.cost_rows || 0) + ' row(s) in the ledger' + (payers.length ? ' · ' + payers.join(' & ') : '')) +
+    stat(usd(s.monthly_recurring_usd), 'monthly repeated', '', usd(s.yearly_run_rate_usd) + ' a year') +
+    stat(usd(s.one_off_usd), 'one-off purchases', '') +
+    stat(String(s.active_subscriptions || 0), 'subscriptions running', '',
+         s.next_renewal_on ? 'next charge ' + s.next_renewal_on : 'none outstanding') +
+    stat(String(s.with_receipt || 0) + '/' + (s.cost_rows || 0), 'receipts on file', '') +
+    '</div>' +
+    (payers.length
+      ? '<div class="chipbox" style="margin-top:12px">' + payers.map(p =>
+          '<span class="chip">' + esc(p) + ' ' + usd(s.by_payer_usd[p]) + '</span>').join('') + '</div>'
+      : '');
+
+  const tb = $('costsTable').querySelector('tbody');
+  if (!costRows.length) {
+    tb.innerHTML = '<tr><td colspan="10"><span class="hint">Nothing recorded yet. The first row is usually the domain or the first month of hosting.</span></td></tr>';
+  } else {
+    tb.innerHTML = costRows.map(c => {
+      const receipts = (c.receipts || []).map(r =>
+        '<button class="ghost tiny" data-receipt="' + r.id + '" title="' + esc(r.name) + '">view</button>').join(' ');
+      const repeats = c.kind === 'recurring'
+        ? (c.cadence === 'yearly' ? 'yearly' : 'monthly') +
+          (c.ended_on ? '<div class="tiny">ended ' + esc(c.ended_on) + '</div>' : '')
+        : 'no';
+      const money = usd(c.amount_usd) + (c.kind === 'recurring' ? '<div class="tiny">per ' + (c.cadence === 'yearly' ? 'year' : 'month') + '</div>' : '');
+      const charged = c.kind === 'recurring'
+        ? usd(c.charged_to_date_usd) + '<div class="tiny">' + c.charges + ' charge(s)</div>'
+        : usd(c.charged_to_date_usd);
+      return '<tr>' +
+        '<td class="nw">' + esc(c.paid_on) + '</td>' +
+        '<td>' + esc(c.paid_by) + '</td>' +
+        '<td>' + esc(c.vendor) + '</td>' +
+        '<td>' + esc(c.description || '—') + '</td>' +
+        '<td class="nw">' + money + '</td>' +
+        '<td>' + repeats + '</td>' +
+        '<td>' + charged + '</td>' +
+        '<td class="nw">' + esc(c.next_charge_on || '—') + '</td>' +
+        '<td>' + (receipts || '<span class="tiny">none</span>') + '</td>' +
+        '<td class="tiny"><button class="ghost tiny" data-attach="' + c.id + '">attach</button> ' +
+          (c.kind === 'recurring'
+            ? (c.ended_on
+                ? '<button class="ghost tiny" data-resume="' + c.id + '">resume</button>'
+                : '<button class="ghost tiny" data-end="' + c.id + '">end</button> ')
+            : '') +
+          '<button class="ghost tiny" data-delcost="' + c.id + '">delete</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  const sum = $('sum-costs');
+  if (sum) sum.textContent = (s.cost_rows || 0) + ' cost(s) · ' + usd(s.spent_to_date_usd) + ' spent · ' +
+    usd(s.monthly_recurring_usd) + '/mo repeating';
+}
+
+async function openReceipt(id){
+  const t = localStorage.getItem(TOKEN_KEY);
+  const r = await fetch(base() + '/api/admin/costs/receipts/' + id, { headers: { Authorization: 'Bearer ' + t } });
+  if (!r.ok) { costNote('Could not open that receipt (' + r.status + ')', false); return; }
+  const blob = await r.blob();
+  window.open(URL.createObjectURL(blob), '_blank');
+}
+
+async function attachReceipt(costId){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,application/pdf';
+  input.onchange = async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { costNote('That receipt is over 10 MB.', false); return; }
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      await api('/api/admin/costs/' + costId + '/receipt', { method: 'POST', body: fd });
+      costNote('Receipt attached.', true);
+      loadCosts();
+    } catch (err) { costNote('The receipt did not attach — ' + err.message, false); }
+  };
+  input.click();
+}
+
+async function addCost(){
+  const amount = ($('cAmount').value || '').replace(/[^0-9.]/g, '');
+  const cents = Math.round(parseFloat(amount || '0') * 100);
+  const kind = $('cKind').value;
+  if (!$('cPayer').value.trim() || !$('cVendor').value.trim()) {
+    costNote('Who paid and who was paid both need filling in.', false); return;
+  }
+  if (!cents) { costNote('The amount is empty or zero.', false); return; }
+  const payload = {
+    paid_on: $('cDate').value || null,
+    paid_by: $('cPayer').value.trim(),
+    vendor: $('cVendor').value.trim(),
+    description: $('cWhat').value.trim() || null,
+    amount_cents: cents,
+    kind: kind,
+    cadence: kind === 'recurring' ? $('cCadence').value : null,
+    started_on: kind === 'recurring' ? ($('cDate').value || null) : null
+  };
+  const btn = $('cAdd'); btn.disabled = true;
+  try {
+    const cost = await api('/api/admin/costs', { method: 'POST', body: payload });
+    const f = ($('cReceipt').files || [])[0];
+    if (f) {
+      const fd = new FormData(); fd.append('file', f);
+      try { await api('/api/admin/costs/' + cost.id + '/receipt', { method: 'POST', body: fd }); }
+      catch (err) { costNote('The cost was saved but the receipt did not attach — ' + err.message, false); }
+    }
+    ['cPayer', 'cVendor', 'cWhat', 'cAmount'].forEach(id => { $(id).value = ''; });
+    $('cReceipt').value = '';
+    $('cDate').value = new Date().toISOString().slice(0, 10);
+    costNote('Added. The ledger and the totals above are updated.', true);
+    loadCosts();
+  } catch (err) {
+    costNote('Could not add that — ' + err.message, false);
+  } finally { btn.disabled = false; }
+}
+
+async function endCost(id, resume){
+  try {
+    await api('/api/admin/costs/' + id, { method: 'PATCH',
+      body: { ended_on: resume ? null : new Date().toISOString().slice(0, 10) } });
+    costNote(resume ? 'Running again — back in the monthly figure.' : 'Ended. Its past charges still count.', true);
+    loadCosts();
+  } catch (err) { costNote('Could not change that — ' + err.message, false); }
+}
+
+async function deleteCost(id){
+  const row = costRows.find(c => c.id === id) || {};
+  if (!confirm('Delete the ' + usd(row.amount_usd) + ' cost to ' + (row.vendor || 'this vendor') + ' and its receipts?')) return;
+  try {
+    await api('/api/admin/costs/' + id, { method: 'DELETE' });
+    costNote('Deleted.', true);
+    loadCosts();
+  } catch (err) { costNote('Could not delete that — ' + err.message, false); }
+}
+
+if ($('cAdd')) {
+  $('cAdd').addEventListener('click', addCost);
+  $('cKind').addEventListener('change', () => {
+    const rec = $('cKind').value === 'recurring';
+    $('cCadenceWrap').style.display = rec ? '' : 'none';
+    if (rec && !$('cDate').value) $('cDate').value = new Date().toISOString().slice(0, 10);
+  });
+  const d = $('cDate'); if (d) d.value = new Date().toISOString().slice(0, 10);
+  $('costsTable').addEventListener('click', (e) => {
+    const r = e.target.closest('[data-receipt],[data-attach],[data-delcost],[data-end],[data-resume]');
+    if (!r) return;
+    if (r.dataset.receipt) return openReceipt(Number(r.dataset.receipt));
+    if (r.dataset.attach) return attachReceipt(Number(r.dataset.attach));
+    if (r.dataset.delcost) return deleteCost(Number(r.dataset.delcost));
+    if (r.dataset.end) return endCost(Number(r.dataset.end), false);
+    if (r.dataset.resume) return endCost(Number(r.dataset.resume), true);
+  });
+}
+
+
+function refreshAll(){ loadHealth(); loadMetrics(); loadUsers(); loadTickets(); loadCosts(); }
 
 $('loginBtn').addEventListener('click', login);
 $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(e); });

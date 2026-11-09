@@ -8,6 +8,7 @@ from app.api import oauth
 from app.api import content
 from app.api import engine
 from app.api import billing
+from app.api import costs
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(resmara.router, prefix="", tags=["resmara"])
@@ -17,3 +18,5 @@ api_router.include_router(content.router, prefix="/content", tags=["content"])
 api_router.include_router(engine.router, prefix="", tags=["engine"])
 # Billing: /api/billing/config|checkout|webhook|orders. A campaign is $49, bought outright.
 api_router.include_router(billing.router, prefix="", tags=["billing"])
+# Start-up costs: /api/admin/costs — what the project cost, who paid, receipts, subscriptions.
+api_router.include_router(costs.router, prefix="", tags=["costs"])
