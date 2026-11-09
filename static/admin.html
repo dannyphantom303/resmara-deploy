@@ -172,6 +172,12 @@ tr.testrow td{background:#fbfdff;color:#849bae}
 .ticket-detail{background:var(--paper);border-top:1px solid var(--hair)}
 
 /* ── phones: the column folds into a header strip ─────────────────────────── */
+@media(max-width:560px){
+  /* On a phone the bar keeps only what acts: who you are, refresh, sign out. */
+  #statusPill{display:none}
+  #collapseAll{display:none}
+  .topbar .who{max-width:42vw}
+}
 @media(max-width:880px){
   .topbar{padding:10px 16px}
   #crumbWrap,.crumb{display:none}
