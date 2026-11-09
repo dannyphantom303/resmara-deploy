@@ -381,6 +381,12 @@ function sparkline(days){
     '</div><div class="spark-axis"><span>' + esc(days[0].date) + '</span><span>' + esc(days[days.length-1].date) + '</span></div>';
 }
 
+// A section the server could not compute says so, in its own square, with the reason.
+function groupError(what, reason){
+  return '<div class="msg bad">The ' + esc(what) + ' figures could not be read: ' + esc(reason) +
+    '</div><div class="hint">The other sections still loaded — this one is named in “Not measured” below.</div>';
+}
+
 let lastMetrics = null;
 async function loadMetrics(){
   try {
@@ -392,7 +398,7 @@ async function loadMetrics(){
     $('testTicketCount').textContent = s.test_tickets || 0;
     openFromWork(m);
 
-    $('campaignsBody').innerHTML =
+    $('campaignsBody').innerHTML = c.error ? groupError('campaigns', c.error) :
       '<div class="grid">' +
         stat(u.total, 'accounts', '', u.test_accounts ? u.real + ' real · ' + u.test_accounts + ' test' : '') +
         stat(c.total, 'campaigns', '', c.test_campaigns ? c.real + ' real · ' + c.test_campaigns + ' test' : '') +
@@ -402,7 +408,7 @@ async function loadMetrics(){
         statRaw(pills(c.by_stage), 'by stage', 'wide') +
       '</div>';
 
-    $('contentBody').innerHTML =
+    $('contentBody').innerHTML = ct.error ? groupError('content', ct.error) :
       '<div class="grid">' +
         stat(ct.posts_total, 'posts', '', ct.test_posts ? ct.real_posts + ' real · ' + ct.test_posts + ' test' : '') +
         stat(ct.due_now, 'due for the publisher', '', ct.due_now_test ? ct.due_now_test + ' of them test' : '') +
@@ -411,11 +417,14 @@ async function loadMetrics(){
         stat(ct.failed, 'publish failed', '', ct.failed_test ? ct.failed_test + ' of them test' : '') +
         stat(fmt(ct.next_publish_at), 'next publish', 'wide') +
         stat(ct.photos, 'photos', '', ct.photos_test ? ct.photos_test + ' test' : '') +
-        stat(ct.photos_tagged + ' tagged', 'of those') +
-        stat(ct.designs, 'designs') +
+        // Was "37 tagged / of those": a number with no noun. Name what is tagged (a photo
+        // attached to a campaign) and what is not, so the square answers a question.
+        stat(ct.photos_tagged, 'photos on a campaign', '',
+          ct.photos_untagged ? ct.photos_untagged + ' imported but not used yet' : 'every photo is on a campaign') +
+        stat(ct.designs, 'designs', '', 'creative the engine drew') +
       '</div>';
 
-    $('advertisingBody').innerHTML =
+    $('advertisingBody').innerHTML = a.error ? groupError('advertising', a.error) :
       '<div class="grid">' +
         stat(a.accounts, 'ad accounts') + stat(a.live_accounts, 'live tokens') +
         stat(a.simulated, 'simulated') +
@@ -425,7 +434,7 @@ async function loadMetrics(){
         statRaw(pills(a.platforms), 'platforms', 'wide') +
       '</div><p class="hint">Token state is written by the health sweep, so this is the last thing we actually asked Meta — not a guess about whether a token still works.</p>';
 
-    $('activityBody').innerHTML =
+    $('activityBody').innerHTML = act.error ? groupError('activity', act.error) :
       '<h3>Last ' + esc(act.days || 14) + ' days (UTC)</h3>' + sparkline(act.per_day) +
       '<div style="margin-top:6px">' + pills(act.by_type_14d) + '</div>' +
       '<div class="hint" style="margin-top:6px">' + esc(act.total_14d || 0) + ' recorded event(s) in the window.</div>';
@@ -440,10 +449,16 @@ async function loadMetrics(){
     renderUsers();
     $('stamp').textContent = 'refreshed ' + new Date().toISOString().slice(11,19) + ' UTC';
   } catch (err) {
-    $('campaignsBody').innerHTML = '<div class="hint">metrics: ' + esc(err.message) + '</div>';
-    $('contentBody').innerHTML = '';
-    $('advertisingBody').innerHTML = '';
-    $('activityBody').innerHTML = '';
+    // Every square used to go blank and only one of the four sections said why. Say it once,
+    // in each section, and keep the console's own health row as the place to look next.
+    const why = '<div class="msg bad">Could not read this section: ' + esc(err.message) +
+      ' — open “Health” below for the service side.' +
+      ' for the service side.</div>';
+    lastMetrics = null;
+    $('triage').innerHTML = '<div class="hint" style="grid-column:1/-1">The work queue could not be counted: ' + esc(err.message) + '</div>';
+    ['campaignsBody', 'contentBody', 'advertisingBody', 'activityBody'].forEach(id => { $(id).innerHTML = why; });
+    ['sum-support','sum-content','sum-campaigns','sum-users','sum-advertising','sum-activity'].forEach(id => { $(id).innerHTML = '<b>unavailable</b>'; });
+    $('stamp').textContent = 'metrics failed at ' + new Date().toISOString().slice(11,19) + ' UTC';
   }
 }
 

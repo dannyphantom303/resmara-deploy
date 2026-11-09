@@ -19,7 +19,7 @@ the window.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import Text, func, or_
 
 from app.core.config import settings
 from app.core.testdata import is_test_email
@@ -219,11 +219,24 @@ def _users(db, ids) -> Dict[str, Any]:
     }
 
 
+def empty_plan_clause():
+    """A campaign with no plan yet: nothing stored, or an empty container.
+
+    ``Boost.plan`` is a JSON column. Comparing it with ``== {}`` renders ``plan = '{}'::JSON``,
+    and Postgres has no equality operator for ``json`` (only ``jsonb``), so that predicate
+    raised ``operator does not exist: json = json`` on the live database while passing on
+    SQLite -- which blanked every square of the admin console with a 500. Compare the text
+    form instead; it means the same thing on both dialects.
+    """
+    plan_text = func.coalesce(func.cast(Boost.plan, Text), "")
+    return or_(Boost.plan.is_(None), plan_text.in_(("", "{}", "null", '""', "[]")))
+
+
 def _campaigns(db, ids) -> Dict[str, Any]:
     by_stage: Dict[str, int] = {}
     for stage, n in db.query(Boost.stage, func.count(Boost.id)).group_by(Boost.stage).all():
         by_stage[str(stage or "UNKNOWN")] = int(n)
-    empty_plan = or_(Boost.plan.is_(None), Boost.plan == {}, Boost.plan == "")
+    empty_plan = empty_plan_clause()
     total, test = _count(db, Boost), _test_share(db, Boost, ids)
     return {
         "total": total,
@@ -369,13 +382,27 @@ def activity(db) -> Dict[str, Any]:
     # Counted once: every group reports the same test share, and a customer's row must never
     # be hidden by a different rule in a different card.
     test_ids = _test_user_ids(db)
+    failures: List[Dict[str, str]] = []
+
+    def group(name, fn, *args):
+        """One broken query must not blank the other five sections of the console."""
+        try:
+            return fn(db, *args)
+        except Exception as exc:  # noqa: BLE001 - the console needs the reason, not a stack
+            reason = f"the {name} query failed: {type(exc).__name__}: {exc}"
+            failures.append({"metric": name, "reason": reason[:400]})
+            return {"error": reason[:400]}
+
+    groups = {
+        "users": group("users", _users, test_ids),
+        "campaigns": group("campaigns", _campaigns, test_ids),
+        "content": group("content", _content, test_ids),
+        "support": group("support", _support, test_ids),
+        "advertising": group("advertising", _advertising),
+        "activity": group("activity", _activity_log),
+    }
     return {
-        "users": _users(db, test_ids),
-        "campaigns": _campaigns(db, test_ids),
-        "content": _content(db, test_ids),
-        "support": _support(db, test_ids),
-        "advertising": _advertising(db),
-        "activity": _activity_log(db),
+        **groups,
         "unavailable": [
             {
                 "metric": "ad_spend",
@@ -389,6 +416,6 @@ def activity(db) -> Dict[str, Any]:
                 "metric": "revenue",
                 "reason": "no subscription or credit price is configured for this product",
             },
-        ],
+        ] + failures,
         "generated_at": _iso(_utcnow()),
     }

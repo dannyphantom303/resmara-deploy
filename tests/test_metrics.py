@@ -234,6 +234,34 @@ def main():
     check("every unavailable entry carries a reason",
           all(x.get("reason") for x in a["unavailable"]), a["unavailable"])
 
+    print("\n[dialect: the query Postgres actually gets]")
+    # `Boost.plan` is JSON. `plan == {}` compiles to `plan = '{}'::JSON`, and Postgres has no
+    # equality operator for json -- the live console answered 500 with
+    # "operator does not exist: json = json" and every square went blank. SQLite accepts it,
+    # so only a compile check catches it before a deploy.
+    from sqlalchemy.dialects import postgresql
+    from app.services.metrics import empty_plan_clause
+    pg_sql = str(empty_plan_clause().compile(dialect=postgresql.dialect()))
+    check("the no-plan rule never compares the JSON column with =",
+          "boosts.plan =" not in pg_sql, pg_sql)
+    check("the no-plan rule compares the JSON column as text",
+          "CAST(boosts.plan AS TEXT)" in pg_sql, pg_sql)
+
+    print("\n[a broken section does not blank the others]")
+    import app.services.metrics as MM
+    original = MM._campaigns
+    MM._campaigns = lambda db, ids: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        broken = MM.activity(db)
+    finally:
+        MM._campaigns = original
+    check("the failed group says so in its own slot", "boom" in (broken["campaigns"].get("error") or ""),
+          broken["campaigns"])
+    check("the failure is named under unavailable",
+          any(x["metric"] == "campaigns" for x in broken["unavailable"]), broken["unavailable"])
+    check("the other groups still return real numbers",
+          broken["content"]["posts_total"] == a["content"]["posts_total"], broken["content"])
+
     print()
     print(f"{PASSED} passed, {FAILED} failed")
     return 1 if FAILED else 0
