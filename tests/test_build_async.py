@@ -61,6 +61,21 @@ def main() -> int:
         check("create a boost", made.status_code in (200, 201), str(made.status_code))
         boost_id = made.json()["id"]
 
+        # This suite is about the async build, not the price. A campaign is $49 and an unpaid
+        # one is refused with 402 (covered in test_billing), so mark this one paid here rather
+        # than making the account an admin and hiding a real gate.
+        from datetime import datetime
+
+        from app.db.session import SessionLocal, Boost
+        db = SessionLocal()
+        try:
+            row = db.query(Boost).filter(Boost.id == boost_id).first()
+            row.paid_at = datetime.utcnow()
+            row.paid_amount_cents = 4900
+            db.commit()
+        finally:
+            db.close()
+
         t0 = time.time()
         started = client.post(f"/api/boosts/{boost_id}/build", headers=h, json={"force": True})
         elapsed = time.time() - t0

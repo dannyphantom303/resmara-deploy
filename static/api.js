@@ -272,15 +272,24 @@
     return request('/api/boosts/' + segment(boostId) + '/approve', { method: 'POST' });
   }
 
-  // ---- launch + budget precheck -------------------------------------------
+  // ---- billing ------------------------------------------------------------
+  // One campaign costs $49 and is bought outright: there is no credit balance to check, so
+  // the old /adflow/credits/precheck/ call is gone with the credit system.
 
-  function precheck(opts) {
-    opts = opts || {};
-    return json('/api/adflow/credits/precheck/', 'POST', {
-      platform: opts.platform || 'meta',
-      advertiser_id: opts.advertiser_id,
-      budget: opts.budget,
-    });
+  function billingConfig() {
+    return request('/api/billing/config');
+  }
+
+  function checkout(boostId) {
+    return json('/api/billing/checkout', 'POST', { boost_id: boostId });
+  }
+
+  function orders() {
+    return request('/api/billing/orders');
+  }
+
+  function boostBilling(boostId) {
+    return request('/api/billing/boost/' + segment(boostId));
   }
 
   function launch(boostId, opts) {
@@ -390,7 +399,10 @@
     approvePost: approvePost,
     approveAll: approveAll,
     generateContent: generateContent,
-    precheck: precheck,
+    billingConfig: billingConfig,
+    checkout: checkout,
+    orders: orders,
+    boostBilling: boostBilling,
     launch: launch,
     publishStatus: publishStatus,
     publishNow: publishNow,

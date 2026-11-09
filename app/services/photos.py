@@ -121,9 +121,14 @@ def _walk_json_images(node, out: list) -> None:
 def extract_image_urls(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[str]:
     """Gallery URLs from a listing page, best first, absolute and de-duplicated.
 
-    Order of trust: og:image (the page's own hero), structured data (the MLS gallery),
-    then <img>/<picture> tags in document order. Logos, icons and tracking pixels are
-    dropped by name, and anything that is not a raster image is skipped.
+    Order of trust: og:image (the page's own hero and the most reliable single image),
+    the MLS gallery in structured data, then <img>/<picture> tags in document order. Logos,
+    icons and tracking pixels are dropped by name, and anything that is not a raster image
+    is skipped.
+
+    This is the generic path. Movoto and Trulia bury nothing useful in meta tags — on a
+    52-photo Movoto listing every meta/tag heuristic together found 3 URLs — so
+    ``discover`` prefers the site adapters below and only lands here for other hosts.
     """
     html = html or ""
     found: list[str] = []
@@ -170,6 +175,215 @@ def extract_image_urls(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> 
     return out
 
 
+# ---------------------------------------------------------------------------
+# Site adapters.
+#
+# Listing galleries are not in og:image or <img> tags — they are in inline JSON. Movoto
+# keeps a `__INITIAL_STATE__` blob, Trulia publishes JSON-LD. Reading that JSON is the
+# difference between 3 photos and all of them, so each site gets an explicit parser and a
+# testable pure function.
+# ---------------------------------------------------------------------------
+
+_INITIAL_STATE_RE = re.compile(
+    r'<script[^>]*id=["\']__INITIAL_STATE__["\'][^>]*>(.*?)</script>', re.I | re.S)
+_NEXT_DATA_RE = re.compile(
+    r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', re.I | re.S)
+_ZILLOW_HASH_RE = re.compile(r"zillowstatic/fp/([a-z0-9]+)", re.I)
+
+
+def _json_blobs(html: str) -> list:
+    out = []
+    for block in _LD_RE.findall(html or ""):
+        try:
+            out.append(json.loads(block.strip()))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def _initial_state(html: str) -> dict:
+    m = _INITIAL_STATE_RE.search(html or "")
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(1))
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _next_data(html: str) -> dict:
+    """The Next.js props blob Trulia (and every other modern listing site) renders from."""
+    m = _NEXT_DATA_RE.search(html or "")
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(1))
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def movoto_photo_urls(html: str, size: str = "l") -> list[str]:
+    """Every gallery photo on a Movoto detail page, in the order the listing shows them.
+
+    Movoto's size suffixes: "" original (2048px), "_l" 1920px, "_r" 960px, "_p" 480px
+    thumbnail. "l" is the bandwidth/quality sweet spot; "p" — which is what the card
+    thumbnail field holds — is a tile, not a photo.
+    """
+    state = _initial_state(html)
+    page = state.get("pageData") or {}
+    out: list[str] = []
+    for category in page.get("categorizedPhotos") or []:
+        for photo in (category or {}).get("photos") or []:
+            url = (photo or {}).get("url")
+            if not isinstance(url, str):
+                continue
+            suffix = ((photo.get("images") or {}).get(size) or "")
+            out.append(url.replace(".webp", suffix) if suffix and url.endswith(".webp") else url)
+    return list(dict.fromkeys(u for u in out if _looks_like_image(u)))
+
+
+def movoto_listings(html: str) -> list[dict]:
+    """The listings on a Movoto city page (price, beds, baths, sqft, detail path)."""
+    page = (_initial_state(html).get("pageData") or {})
+    rows = []
+    for item in page.get("listings") or []:
+        path = (item or {}).get("path")
+        if not isinstance(path, str):
+            continue
+        rows.append({
+            "address": ((item.get("geo") or {}).get("address") or "").strip(),
+            "city": (item.get("geo") or {}).get("city"),
+            "zip": (item.get("geo") or {}).get("zipcode"),
+            "price": item.get("listPrice"), "beds": item.get("bed"), "baths": item.get("bath"),
+            "sqft": item.get("sqftTotal"), "photo_count": item.get("photoCount"),
+            "url": urljoin("https://www.movoto.com/", path),
+        })
+    return rows
+
+
+def trulia_photo_urls(html: str, full_res: bool = True) -> list[str]:
+    """Trulia gallery photos, upgraded to Zillow's CDN original when possible.
+
+    Trulia is a Next.js app: the gallery is ``props.homeDetails.media.photos[].url.large``
+    inside ``__NEXT_DATA__`` (JSON-LD carries only one hero image, so it is the fallback).
+    Photos are served at 1024px from ``/pictures/thumbs_5/zillowstatic/fp/<hash>-full.jpg``;
+    the same hash on ``photos.zillowstatic.com`` returns the 3000×2250 original with no
+    Referer required, and Trulia's robots.txt explicitly allows the thumbs path.
+    """
+    urls: list[str] = []
+
+    data = _next_data(html)
+    if data:
+        home = ((data.get("props") or {}).get("homeDetails") or {})
+        media = home.get("media") or {}
+        for photo in media.get("photos") or []:
+            url = (photo or {}).get("url") if isinstance(photo, dict) else None
+            if isinstance(url, dict):
+                urls.append(url.get("large") or url.get("thumbnail") or "")
+            elif isinstance(url, str):
+                urls.append(url)
+
+    found: list[str] = []
+    for blob in _json_blobs(html):
+        _walk_json_images(blob, found)
+    urls.extend(found)
+
+    out: list[str] = []
+    for url in urls:
+        if not url or _is_furniture(url):
+            continue
+        m = _ZILLOW_HASH_RE.search(url)
+        if m and full_res:
+            out.append(f"https://photos.zillowstatic.com/fp/{m.group(1)}-full.jpg")
+        elif _looks_like_image(url):
+            out.append(url)
+    return list(dict.fromkeys(out))
+
+
+def trulia_listings(html: str) -> list[dict]:
+    """Listings on a Trulia city page, taken from JSON-LD (the page has no listing links)."""
+    rows: list[dict] = []
+
+    def visit(node):
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+        elif isinstance(node, dict):
+            offers = node.get("offers")
+            offer = offers[0] if isinstance(offers, list) and offers else offers
+            url = (offer or {}).get("url") if isinstance(offer, dict) else None
+            if isinstance(url, str) and "/home/" in url:
+                offered = node.get("itemOffered") if isinstance(node.get("itemOffered"), dict) else node
+                rows.append({
+                    "url": url,
+                    "price": (offer or {}).get("price"),
+                    "beds": offered.get("numberOfBedrooms"),
+                    "baths": offered.get("numberOfBathroomsTotal"),
+                    "sqft": ((offered.get("floorSize") or {}).get("value")
+                             if isinstance(offered.get("floorSize"), dict) else None),
+                    "address": ((offered.get("address") or {}).get("streetAddress")
+                                if isinstance(offered.get("address"), dict) else None),
+                })
+            for value in node.values():
+                visit(value)
+
+    for blob in _json_blobs(html):
+        visit(blob)
+    seen, out = set(), []
+    for row in rows:
+        if row["url"] in seen:
+            continue
+        seen.add(row["url"])
+        out.append(row)
+    return out
+
+
+def _street_tokens(text: str) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if t]
+
+
+def match_listing(rows: list[dict], address: str = "", zipcode: str = "") -> dict | None:
+    """Find the listing for the same property as ``address`` ('1234 Elm St, Redding, CA').
+
+    Matches on the house number plus at least two street words, in either the row's own
+    address or its URL slug — that is what lets a Zillow link be re-resolved on Trulia,
+    where 'St' and 'Street' must still be the same house.
+    """
+    tokens = _street_tokens(address)
+    if not tokens:
+        return None
+    number = tokens[0] if tokens[0].isdigit() else ""
+    street = tokens[1:4]
+    if not number and len(street) < 2:
+        return None
+    want_zip = (zipcode or "").strip()
+
+    for row in rows:
+        address_tokens = set(_street_tokens(row.get("address") or ""))
+        slug = re.sub(r"[^a-z0-9]+", "-", (row.get("url") or "").lower())
+        has_number = (number and (number in address_tokens or number in slug)) if number else True
+        hits = sum(1 for t in street if t in address_tokens or t in slug)
+        if has_number and hits >= min(2, len(street) or 2):
+            if want_zip and want_zip not in slug and want_zip not in (row.get("address") or ""):
+                continue
+            return row
+    return None
+
+
+def address_from_listing_url(url: str) -> tuple[str, str, str]:
+    """(address, state, zip) guessed from a listing URL, for the Trulia fallback."""
+    path = urlparse(url).path
+    slug = path.strip("/").split("/")[-2] if path.strip("/").count("/") >= 1 else path.strip("/")
+    slug = slug.replace("_zpid", "")
+    parts = [p for p in slug.split("-") if p]
+    address = " ".join(parts[:4])
+    state = next((p for p in parts if re.fullmatch(r"[A-Z]{2}", p)), "")
+    zipcode = next((p for p in parts if re.fullmatch(r"\d{5}", p)), "")
+    return address, state, zipcode
+
+
 def guess_ext(url: str, content_type: str = "") -> str:
     ctype = (content_type or "").split(";")[0].strip().lower()
     if ctype in CONTENT_TYPE_EXT:
@@ -195,14 +409,89 @@ def _client() -> httpx.AsyncClient:
     )
 
 
-async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None) -> list[str]:
-    """Fetch a listing page and return the image URLs on it."""
+_CHROME_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def _trulia_city_url(address: str, zipcode: str) -> str:
+    """Best guess at a Trulia city page for an address ('1234 Elm St, Redding, CA')."""
+    m = re.search(r",\s*([^,]+),\s*([A-Z]{2})\b", address or "")
+    if not m:
+        return ""
+    city = re.sub(r"[^A-Za-z ]+", "", m.group(1)).strip().replace(" ", "-")
+    return f"https://www.trulia.com/{m.group(2)}/{city}/"
+
+
+async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None,
+                   address: str = "", zipcode: str = "") -> list[str]:
+    """Gallery photo URLs for a listing, using the site that actually still serves them.
+
+    One fetch per page, no headless browser. Which source is used is decided by host:
+
+      * movoto.com — the listing's own ``__INITIAL_STATE__`` gallery (all photos, 1920px)
+      * trulia.com — JSON-LD gallery upgraded to the 3000px Zillow CDN original
+      * anything else (zillow, realtor, redfin, homes.com, an MLS page) — that page is
+        tried first, and if it is walled or yields nothing, the same property is looked up
+        on Trulia by address. Those hosts block server-side fetches outright; Trulia is
+        the same inventory without the wall.
+
+    Returns [] rather than raising when a page yields nothing, so the caller can explain
+    the options instead of surfacing an httpx status code.
+    """
     own = client is None
     client = client or _client()
+    host = _host(listing_url)
     try:
-        resp = await client.get(listing_url, headers={"Accept": "text/html,*/*"})
-        resp.raise_for_status()
-        return extract_image_urls(resp.text, str(resp.url), limit=limit)
+        try:
+            resp = await client.get(listing_url, headers=_CHROME_HEADERS)
+            resp.raise_for_status()
+            html = resp.text
+        except httpx.HTTPError:
+            html = ""
+
+        if "movoto.com" in host and html:
+            photos = movoto_photo_urls(html)
+            if photos:
+                return photos[:limit]
+            rows = movoto_listings(html)                    # a city page, not a listing
+            match = match_listing(rows, address, zipcode)
+            if match:
+                detail = await client.get(match["url"], headers=_CHROME_HEADERS)
+                detail.raise_for_status()
+                return movoto_photo_urls(detail.text)[:limit]
+
+        if "trulia.com" in host and html:
+            # 1024px thumbs, not the 3000px originals: a Facebook or Instagram post is
+            # 1080px wide, so the original is ~8x the bytes for detail nobody sees, and on a
+            # free database every campaign's gallery is stored as bytes.
+            photos = trulia_photo_urls(html, full_res=False)
+            if photos:
+                return photos[:limit]
+
+        if html:
+            generic = extract_image_urls(html, str(resp.url), limit=limit)
+            if generic:
+                return generic
+
+        # Walled or empty: same property, friendlier host.
+        city_url = _trulia_city_url(address, zipcode)
+        if city_url and "trulia.com" not in host:
+            city = await client.get(city_url, headers=_CHROME_HEADERS)
+            if city.status_code == 200:
+                match = match_listing(trulia_listings(city.text), address, zipcode)
+                if match:
+                    detail = await client.get(match["url"], headers=_CHROME_HEADERS)
+                    detail.raise_for_status()
+                    return trulia_photo_urls(detail.text, full_res=False)[:limit]
+        return []
     finally:
         if own:
             await client.aclose()

@@ -179,11 +179,16 @@ async function one(name, run, expect) {
         eq('  present notes kept', body.get('notes'), 'x');
       } });
 
-  // ---- launch + precheck -----------------------------------------------------
-  console.log('\nlaunch and precheck');
-  await one('RM.precheck', () => RM.precheck({ platform: 'meta', advertiser_id: 'act_1', budget: 50 }),
-    { method: 'POST', path: '/api/adflow/credits/precheck/', contentType: 'application/json',
-      jsonBody: { platform: 'meta', advertiser_id: 'act_1', budget: 50 } });
+  // ---- launch + billing ------------------------------------------------------
+  console.log('\nlaunch and billing');
+  // The credit precheck endpoint is gone with the credit system: a campaign is $49 in Stripe
+  // Checkout, so the client's billing calls are what has to hold.
+  await one('RM.billingConfig', () => RM.billingConfig(), { method: 'GET', path: '/api/billing/config' });
+  await one('RM.checkout', () => RM.checkout(7),
+    { method: 'POST', path: '/api/billing/checkout', contentType: 'application/json',
+      jsonBody: { boost_id: 7 } });
+  await one('RM.orders', () => RM.orders(), { method: 'GET', path: '/api/billing/orders' });
+  await one('RM.boostBilling', () => RM.boostBilling(7), { method: 'GET', path: '/api/billing/boost/7' });
   await one('RM.launch', () => RM.launch(7, { auto_approve: true, meta_custom_configs: { campaign_name: 'Elm St' } }),
     { method: 'POST', path: '/api/launch', contentType: 'application/json',
       jsonBody: { platform: 'meta', boost_id: 7, auto_approve: true, meta_custom_configs: { campaign_name: 'Elm St' } } });

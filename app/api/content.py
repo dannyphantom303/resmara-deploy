@@ -125,7 +125,10 @@ async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User
         if not (payload.listing_url or "").strip():
             raise HTTPException(status_code=400, detail="Give a listing URL or at least one image URL.")
         try:
-            urls = await photos.discover(payload.listing_url.strip(), limit=limit)
+            # Pass the campaign's own address so a walled host (Zillow, Realtor, Redfin,
+            # Homes.com) can be resolved through Trulia, which serves the same inventory.
+            urls = await photos.discover(payload.listing_url.strip(), limit=limit,
+                                         address=boost.address or "")
         except Exception as exc:  # a bot wall or a dead page is the caller's problem to see
             raise HTTPException(status_code=400, detail=f"Could not read that listing page: {exc.__class__.__name__}")
         source = "listing_url"
@@ -133,7 +136,9 @@ async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User
         if not urls:
             return {"boost_id": boost.id, "source": source, "found": 0, "imported": 0,
                     "assets": [], "skipped": [],
-                    "detail": "No image links on that page. Upload the photos directly, or paste direct image URLs."}
+                    "detail": "That page did not give up its photos. Zillow, Realtor, "
+                              "Redfin and Homes.com block server-side reads — paste direct "
+                              "image URLs, or a Movoto or Trulia listing link."}
 
     result = await photos.import_from_urls(
         db, user_id=current_user.id, boost_id=boost.id, urls=urls,

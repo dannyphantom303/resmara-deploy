@@ -1,8 +1,9 @@
 """Hermetic tests for app.services.credits.
 
-Covers the Creatify-mirrored credit precheck, the two-layer approval check
-(including the auto_approve bypass), creative-copy gating, and the full campaign
-state machine (valid transitions accepted, invalid rejected, LIVE terminal).
+Covers the launch budget check (ad-account only — a campaign is bought outright, so no
+subscription/credit balance is consulted), the two-layer approval check (including the
+auto_approve bypass), creative-copy gating, and the full campaign state machine (valid
+transitions accepted, invalid rejected, LIVE terminal).
 
 Run:  cd /Users/dan/resmara && PYTHONPATH=/Users/dan/resmara venv/bin/python tests/test_credits.py
 """
@@ -11,7 +12,7 @@ import sys
 from types import SimpleNamespace
 
 from app.services.credits import (
-    check_credit,
+    check_launch_budget,
     check_approval,
     check_creative_copy,
     CampaignStage,
@@ -44,37 +45,34 @@ def ad_account(budget=1000.0, is_active=True, platform="meta", advertiser_id="ac
 def main():
     global PASSED, FAILED
 
-    # --- check_credit -----------------------------------------------------
-    print("[check_credit]")
-    ok = check_credit(user("active"), ad_account(budget=1000.0), 50.0)
-    for key in ("has_sufficient_credit", "budget_approved", "available_budget",
+    # --- check_launch_budget ---------------------------------------------
+    print("[check_launch_budget]")
+    ok = check_launch_budget(ad_account(budget=1000.0), 50.0)
+    for key in ("budget_approved", "available_budget",
                 "required_budget", "currency", "platform", "advertiser_id", "message"):
         check(f"returns key '{key}'", key in ok, sorted(ok))
-    check("active subscription + enough budget approves",
-          ok["has_sufficient_credit"] is True and ok["budget_approved"] is True)
+    check("enough budget approves", ok["budget_approved"] is True)
     check("available/required echo the account and request",
           ok["available_budget"] == 1000.0 and ok["required_budget"] == 50.0)
     check("currency/platform/advertiser_id surfaced",
           ok["currency"] == "USD" and ok["platform"] == "meta" and ok["advertiser_id"] == "act_1")
 
-    inactive = check_credit(user("inactive"), ad_account(budget=1000.0), 50.0)
-    check("inactive subscription rejects", inactive["budget_approved"] is False)
-    check("inactive subscription message mentions subscription",
-          "subscription" in inactive["message"].lower(), inactive["message"])
+    # A campaign is bought outright, so no subscription or credit balance may block a launch.
+    no_sub = check_launch_budget(ad_account(budget=1000.0), 50.0)
+    check("no subscription is consulted", no_sub["budget_approved"] is True,
+          "a paid campaign must not be re-gated on subscription_status")
+    check("no credit balance is reported", "has_sufficient_credit" not in no_sub, sorted(no_sub))
 
-    admin = check_credit(user("inactive", is_admin=True), ad_account(budget=1000.0), 50.0)
-    check("admin bypasses the subscription gate", admin["budget_approved"] is True)
-
-    poor = check_credit(user("active"), ad_account(budget=10.0), 50.0)
+    poor = check_launch_budget(ad_account(budget=10.0), 50.0)
     check("insufficient budget rejects", poor["budget_approved"] is False)
     check("insufficient budget message present", "budget" in poor["message"].lower(), poor["message"])
 
-    inactive_acct = check_credit(user("active"), ad_account(budget=1000.0, is_active=False), 50.0)
+    inactive_acct = check_launch_budget(ad_account(budget=1000.0, is_active=False), 50.0)
     check("inactive account rejects", inactive_acct["budget_approved"] is False)
     check("inactive account message", "inactive" in inactive_acct["message"].lower(),
           inactive_acct["message"])
 
-    exact = check_credit(user("active"), ad_account(budget=50.0), 50.0)
+    exact = check_launch_budget(ad_account(budget=50.0), 50.0)
     check("budget exactly equal is sufficient", exact["budget_approved"] is True)
 
     # --- check_approval ---------------------------------------------------

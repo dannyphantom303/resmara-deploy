@@ -118,6 +118,10 @@ class Boost(Base):
     ad_brief = Column(JSON, default={})
     meta_campaign_id = Column(String, nullable=True)
     stage = Column(String, default="PENDING")  # PENDING, LIVE, COMPLETE
+    # A campaign is bought, not credited: $49 at checkout sets these, and the build/launch
+    # gates read them. Both null = nobody has paid for this campaign yet.
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    paid_amount_cents = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     launched_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -205,6 +209,26 @@ class PasswordReset(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# --- Orders (one paid campaign = one order) ---
+class Order(Base):
+    """A purchase of one campaign. Stripe holds the money; this row is what gates a build.
+
+    Keyed on the Stripe Checkout session so a replayed webhook updates one row instead of
+    granting a second campaign.
+    """
+    __tablename__ = "orders"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    boost_id = Column(Integer, ForeignKey("boosts.id", ondelete="CASCADE"), nullable=False)
+    amount_cents = Column(Integer, nullable=False, default=4900)
+    currency = Column(String, default="usd")
+    status = Column(String, default="pending")  # pending | paid | expired | failed
+    stripe_session_id = Column(String, nullable=True, index=True)
+    stripe_payment_intent = Column(String, nullable=True)
+    checkout_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    paid_at = Column(DateTime(timezone=True), nullable=True)
 
 # --- Event Log (audit) ---
 class Event(Base):

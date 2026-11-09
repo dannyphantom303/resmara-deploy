@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import Boost, Post, Ad, AdAccount, User, Event
 from app.services.credits import (
-    check_credit, check_approval, CampaignStage, CampaignAction,
+    check_launch_budget, check_approval, CampaignStage, CampaignAction,
 )
 
 
@@ -93,7 +93,7 @@ async def launch_boost(boost: Boost, current_user: User, db: Session, *, budget_
                 "preflight": health.get("summary")}
 
     budget = float(budget_usd or boost.ad_budget_usd or 0.0)
-    precheck = check_credit(current_user, ad_account, budget)
+    precheck = check_launch_budget(ad_account, budget)
     copy_approved = all(p.client_status == "approved" for p in posts)
     approval = check_approval(precheck["budget_approved"], copy_approved, auto_approve=auto_approve)
 

@@ -80,6 +80,69 @@ def main() -> int:
     check("no duplicates survive", len(urls) == len(set(urls)), str(urls))
     check("the limit is respected", len(photos.extract_image_urls(PAGE, "https://x.test", limit=2)) == 2)
 
+    # --- site adapters: the gallery lives in inline JSON, not meta tags -------------------
+    # These fixtures are the exact shapes seen on live pages: Movoto's __INITIAL_STATE__ and
+    # Trulia's __NEXT_DATA__. If either shape changes, the import silently degrades to 1-3
+    # photos, so the shapes are pinned here.
+    MOVOTO_DETAIL = """<html><body><script id="__INITIAL_STATE__" type="application/json">
+    {"pageData": {"photoCount": 3, "categorizedPhotos": [
+      {"category": "Exterior", "photos": [
+        {"url": "https://pi.movoto.com/p/1/abc_0_AAA.webp",
+         "images": {"p": "_p.webp", "l": "_l.webp", "r": "_r.webp"}},
+        {"url": "https://pi.movoto.com/p/1/def_0_BBB.webp",
+         "images": {"p": "_p.webp", "l": "_l.webp", "r": "_r.webp"}}]},
+      {"category": "Kitchen", "photos": [
+        {"url": "https://pi.movoto.com/p/1/ghi_0_CCC.webp",
+         "images": {"p": "_p.webp", "l": "_l.webp", "r": "_r.webp"}}]}]}}
+    </script></body></html>"""
+    mov = photos.movoto_photo_urls(MOVOTO_DETAIL)
+    check("movoto keeps the whole gallery", len(mov) == 3, str(mov))
+    check("movoto upgrades the 480px thumbnail suffix to 1920px",
+          mov and mov[0].endswith("_l.webp") and "_p" not in mov[0], str(mov[:1]))
+    check("movoto falls back to nothing rather than guessing on a broken blob",
+          photos.movoto_photo_urls("<html>no state</html>") == [])
+
+    MOVOTO_CITY = """<script id="__INITIAL_STATE__" type="application/json">
+    {"pageData": {"listings": [
+      {"mlsNumber": "1", "listPrice": 344900, "bed": 3, "bath": 2, "sqftTotal": 1487,
+       "photoCount": 17, "path": "redding-ca/1354-harpole-rd-redding-ca-96002/pid_1/",
+       "geo": {"address": "1354 Harpole Rd", "city": "Redding", "zipcode": "96002"}}]}}
+    </script>"""
+    city = photos.movoto_listings(MOVOTO_CITY)
+    check("movoto city page yields listings", len(city) == 1 and city[0]["price"] == 344900, str(city))
+    check("movoto listing URLs are absolute",
+          city and city[0]["url"].startswith("https://www.movoto.com/redding-ca/"), str(city[:1]))
+
+    TRULIA_DETAIL = """<html><body>
+    <script id="__NEXT_DATA__" type="application/json">
+    {"props": {"homeDetails": {"media": {"totalPhotoCount": 2, "photos": [
+      {"url": {"large": "https://www.trulia.com/pictures/thumbs_5/zillowstatic/fp/aaaa1111-full.jpg",
+               "thumbnail": "https://www.trulia.com/pictures/thumbs_big/zillowstatic/fp/aaaa1111-full.jpg"}},
+      {"url": {"large": "https://www.trulia.com/pictures/thumbs_5/zillowstatic/fp/bbbb2222-full.jpg"}}]}}}}
+    </script>
+    <script type="application/ld+json">{"@type":"Product","image":"https://x.test/logo.png"}</script>
+    </body></html>"""
+    thumbs = photos.trulia_photo_urls(TRULIA_DETAIL, full_res=False)
+    check("trulia reads the Next.js gallery, not the single JSON-LD hero",
+          len(thumbs) == 2 and "aaaa1111" in thumbs[0], str(thumbs))
+    check("trulia drops furniture", not any("logo" in u for u in thumbs), str(thumbs))
+    full = photos.trulia_photo_urls(TRULIA_DETAIL)
+    check("trulia can upgrade to the 3000px CDN original",
+          full and full[0].startswith("https://photos.zillowstatic.com/fp/aaaa1111-full.jpg"),
+          str(full[:1]))
+    check("trulia with no data yields nothing", photos.trulia_photo_urls("<html/>") == [])
+
+    rows = [{"address": None, "url": "https://www.trulia.com/home/1354-harpole-rd-redding-ca-96002-1"},
+            {"address": None, "url": "https://www.trulia.com/home/1154-echo-rd-redding-ca-96002-2"}]
+    hit = photos.match_listing(rows, "1354 Harpole Road, Redding, CA", "96002")
+    check("an address finds its listing across St/Road spellings",
+          hit and "harpole" in hit["url"], str(hit))
+    miss = photos.match_listing(rows, "999 Nowhere Ln, Redding, CA", "96002")
+    check("a different address matches nothing", miss is None, str(miss))
+    check("no address means no match", photos.match_listing(rows, "", "") is None)
+    check("a zip mismatch is not a match",
+          photos.match_listing(rows, "1354 Harpole Rd, Redding, CA", "99999") is None)
+
     # --- download + store, through a mock transport ---------------------------------------
     jpeg = b"\xff\xd8\xff\xe0" + b"0" * 2048
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 1024

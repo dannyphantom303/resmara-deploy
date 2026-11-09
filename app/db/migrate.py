@@ -41,6 +41,24 @@ ADDITIONS = {
         ("data", "BYTEA"),
         ("content_type", "VARCHAR"),
     ],
+    # A campaign is bought, not credited: these columns on an existing install are what let
+    # the build gate ask "was this campaign paid for?" without a second query.
+    "boosts": [
+        ("paid_at", "TIMESTAMP"),
+        ("paid_amount_cents", "INTEGER"),
+    ],
+    "orders": [
+        ("user_id", "INTEGER"),
+        ("boost_id", "INTEGER"),
+        ("amount_cents", "INTEGER"),
+        ("currency", "VARCHAR"),
+        ("status", "VARCHAR"),
+        ("stripe_session_id", "VARCHAR"),
+        ("stripe_payment_intent", "VARCHAR"),
+        ("checkout_url", "TEXT"),
+        ("created_at", "TIMESTAMP"),
+        ("paid_at", "TIMESTAMP"),
+    ],
 }
 
 # SQLite has no BYTEA.

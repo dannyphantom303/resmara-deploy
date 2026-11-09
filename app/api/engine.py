@@ -18,7 +18,8 @@ import time
 
 from app.db.session import get_db, SessionLocal, User, Boost, AdAccount, Post, Event
 from app.core.security import get_current_user
-from app.services.credits import check_credit, CampaignStage, CampaignAction
+from app.services.credits import CampaignStage, CampaignAction
+from app.api.billing import require_paid
 
 router = APIRouter()
 
@@ -100,6 +101,7 @@ async def build_campaign(boost_id: int, body: BuildRequest = BuildRequest(),
     outcome. Four model calls take minutes, which no hosted proxy will hold open.
     """
     boost = _owned_boost(boost_id, current_user, db)
+    require_paid(boost, current_user, db)
     state = _BUILDS.get(boost.id) or {}
     if state.get("status") == "running" and not body.force:
         return {"status": "running", "boost_id": boost.id, "started_at": state.get("started_at")}
@@ -186,6 +188,7 @@ async def launch(boost_id: int, body: dict = None,
     """
     from app.services.launch import launch_boost
     boost = _owned_boost(boost_id, current_user, db)
+    require_paid(boost, current_user, db)
     body = body or {}
     result = await launch_boost(
         boost, current_user, db,
@@ -205,15 +208,5 @@ class PrecheckRequest(BaseModel):
     budget: float = 0.0
 
 
-@router.post("/adflow/credits/precheck/")
-def credits_precheck(body: PrecheckRequest = PrecheckRequest(),
-                     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Creatify's /tools/adflow/credits/precheck/ gate, reimplemented against our own
-    ad-account budget. The launch UI calls this before it offers the launch button."""
-    q = db.query(AdAccount).filter(AdAccount.user_id == current_user.id, AdAccount.platform == body.platform)
-    if body.advertiser_id:
-        q = q.filter(AdAccount.advertiser_id == body.advertiser_id)
-    ad_account = q.first()
-    if not ad_account:
-        raise HTTPException(status_code=400, detail=f"Ad account not found for platform {body.platform}")
-    return check_credit(current_user, ad_account, body.budget)
+# The Creatify-style /adflow/credits/precheck/ endpoint is gone with the credit system: a
+# campaign is bought outright, so there is no balance to pre-check. See app/api/billing.py.

@@ -297,3 +297,29 @@ def admin_health(current_user=Depends(get_admin_user), db: Session = Depends(get
 def admin_metrics(current_user=Depends(get_admin_user), db: Session = Depends(get_db)):
     """What the product is doing, grouped by area and counted from real rows."""
     return MetricsOut(**metrics_service.activity(db))
+
+
+@router.get("/admin/mail")
+def admin_mail_state(current_user=Depends(get_admin_user)):
+    """Which email provider is wired, without exposing the credential itself."""
+    from app.services import mail
+    return mail.delivery_state()
+
+
+@router.post("/admin/mail/test")
+def admin_mail_test(to: str = None, current_user=Depends(get_admin_user)):
+    """Actually send one email, so "email works" is a delivery and not a config opinion.
+
+    Defaults to the operator's own address. Returns the provider, whether the send was
+    accepted, and the reason when it was not — never the credential.
+    """
+    from app.services import mail
+    recipient = (to or getattr(current_user, "email", "") or "").strip()
+    state = mail.delivery_state()
+    if not state["configured"]:
+        return {"sent": False, **state}
+    sent = mail.send_email(recipient, "Resmara email test",
+                           "If you are reading this, Resmara can send email.\n\n"
+                           "Sent by the operator console test button.")
+    return {"sent": bool(sent), "to": recipient,
+            **mail.delivery_state()}

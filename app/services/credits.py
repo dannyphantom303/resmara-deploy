@@ -18,41 +18,31 @@ All functions return plain dicts so the API layer can read them directly.
 from app.db.session import User, AdAccount, Creative  # noqa: F401  (typing / documentation)
 
 
-def check_credit(user, ad_account, budget) -> dict:
-    """Check whether a user has sufficient credit/budget for a campaign.
+def check_launch_budget(ad_account, budget) -> dict:
+    """Whether the ad account itself can carry this campaign's spend.
 
-    Mirrors Creatify's ``POST /tools/adflow/credits/precheck/`` endpoint:
-      * Layer 1 — subscription: ``user.subscription_status == 'active'`` OR the
-        user is an admin (``is_admin`` is a full bypass, matching the reference).
-      * Layer 2 — platform budget: the ad account must be ``is_active`` and its
-        ``budget`` must cover the requested ``budget``.
+    The subscription half of the old credit precheck is gone: a campaign is bought outright
+    ($49, see app/api/billing.py), so "is the user subscribed?" no longer decides anything.
+    What is left is the part that is actually about money already promised to Meta — the ad
+    account must be live and its budget must cover the spend.
 
     Returns ``budget_approved=True`` when the campaign may launch.
     """
-    subscription_approved = (
-        getattr(user, "subscription_status", None) == "active"
-        or bool(getattr(user, "is_admin", False))
-    )
-
     platform_active = bool(getattr(ad_account, "is_active", False))
     available = getattr(ad_account, "budget", None) or 0.0
     required = budget or 0.0
     platform_budget_ok = available >= required
+    approved = platform_active and platform_budget_ok
 
-    has_sufficient = subscription_approved and platform_active and platform_budget_ok
-
-    if has_sufficient:
-        message = "Budget approved — sufficient subscription and platform credits"
-    elif not subscription_approved:
-        message = "Insufficient budget or inactive subscription"
+    if approved:
+        message = "Budget approved — the ad account can carry this spend"
     elif not platform_active:
         message = "Ad account is inactive"
     else:
         message = "Insufficient ad account budget"
 
     return {
-        "has_sufficient_credit": has_sufficient,
-        "budget_approved": has_sufficient,
+        "budget_approved": approved,
         "available_budget": available,
         "required_budget": required,
         "currency": getattr(ad_account, "currency", "USD"),

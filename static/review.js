@@ -25,8 +25,8 @@ function photosPanel(r){
  const seed=/^https?:\/\//i.test(listing)?esc(listing):'';
  return '<section class="panel campaign-photos"><h2 class="campaign-step-title"><span>1</span> Listing photos</h2>'
   +'<p data-photo-count>Checking this campaign’s photos…</p>'
-  +'<p class="fine">Paste the listing link and Resmara pulls the gallery, or upload the photos yourself. Without photos the calendar stays text-only.</p>'
-  +'<label class="scope-field">Listing link<input id="photo-listing-url" type="url" inputmode="url" placeholder="https://your-listing-page/…" value="'+seed+'"></label>'
+  +'<p class="fine">Paste the listing link and Resmara pulls the gallery. Movoto and Trulia links work directly; Zillow, Realtor, Redfin and Homes.com block server reads, so those are matched to the same property on Trulia by address. Or upload the photos yourself — without photos the calendar stays text-only.</p>'
+  +'<label class="scope-field">Listing link<input id="photo-listing-url" type="url" inputmode="url" placeholder="https://www.trulia.com/home/… or https://www.movoto.com/…" value="'+seed+'"></label>'
   +'<div class="modal-actions">'
   +'<button class="campaign-primary" type="button" onclick="importListingPhotos(this)">Import photos from listing →</button>'
   +'<label class="alt button-like">Upload photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadCampaignPhotos(this)"></label>'
@@ -315,7 +315,10 @@ async function buildCampaignFromBackend(){
   if(activeReview()===r){details(ReviewStudio.active);document.querySelector('.review-calendar')?.scrollIntoView({block:'start'})}
   toast('Campaign built: '+(result&&result.posts_created!=null?result.posts_created:r.items.length)+' posts created'+(r.engine&&r.engine.host?' — drafted by '+r.engine.host:'')+'.');
  }catch(e){
-  if(progress?.isConnected&&modal.open)show(`<h2>Campaign build paused</h2><p>${esc(e.message)}</p><p class="fine">Your approved scope is saved. You can retry without using another credit.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to campaign</button></div>`);
+  // 402 = this campaign has not been paid for. The API says so in a machine-readable detail,
+  // so show the price and the checkout button instead of "build paused" and a dead end.
+  if(e&&e.status===402){ReviewStudio.building.delete(r);showPaywall(boostId,e.detail);return}
+  if(progress?.isConnected&&modal.open)show(`<h2>Campaign build paused</h2><p>${esc(e.message)}</p><p class="fine">Your approved scope is saved. You can retry any time.</p><div class="modal-actions"><button class="alt" onclick="modal.close()">Back to campaign</button></div>`);
  }finally{ReviewStudio.building.delete(r)}
 }
 
