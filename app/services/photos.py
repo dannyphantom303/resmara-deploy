@@ -431,7 +431,7 @@ def _trulia_city_url(address: str, zipcode: str) -> str:
 
 
 async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None,
-                   address: str = "", zipcode: str = "") -> list[str]:
+                   address: str = "", zipcode: str = "", trace: list | None = None) -> list[str]:
     """Gallery photo URLs for a listing, using the site that actually still serves them.
 
     One fetch per page, no headless browser. Which source is used is decided by host:
@@ -449,12 +449,21 @@ async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.A
     own = client is None
     client = client or _client()
     host = _host(listing_url)
+
+    def note(url, outcome):
+        # A wall is worth reporting: "Movoto answered 403 from our IP" is a fixable fact,
+        # an empty photo list is not.
+        if trace is not None:
+            trace.append({"url": url, "outcome": outcome})
+
     try:
         try:
             resp = await client.get(listing_url, headers=_CHROME_HEADERS)
+            note(listing_url, resp.status_code)
             resp.raise_for_status()
             html = resp.text
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            note(listing_url, getattr(getattr(exc, "response", None), "status_code", None) or exc.__class__.__name__)
             html = ""
 
         if "movoto.com" in host and html:
@@ -485,6 +494,7 @@ async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.A
         city_url = _trulia_city_url(address, zipcode)
         if city_url and "trulia.com" not in host:
             city = await client.get(city_url, headers=_CHROME_HEADERS)
+            note(city_url, city.status_code)
             if city.status_code == 200:
                 match = match_listing(trulia_listings(city.text), address, zipcode)
                 if match:
