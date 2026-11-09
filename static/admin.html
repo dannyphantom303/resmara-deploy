@@ -99,6 +99,8 @@ details.card[open]>summary{border-bottom:0}
 .stat .n{font-size:26px;font-weight:700;line-height:1.12;letter-spacing:-.9px;color:var(--ink)}
 .stat .l{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin-top:2px}
 .stat .s{font-size:11px;color:#7c93a3;margin-top:3px;line-height:1.45}
+.stat .w{font-size:11.5px;color:#5b7f96;margin-top:6px;line-height:1.45;border-top:1px solid var(--hair);padding-top:6px}
+.tile .w{font-size:11.5px;color:#5b7f96;margin-top:5px;line-height:1.4;font-weight:500}
 .stat.wide .n{font-size:22px;font-weight:700;letter-spacing:-.7px;line-height:1.2}
 .rows div{display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:13px;align-items:baseline}
 .rows div:last-child{border-bottom:0}
@@ -408,12 +410,51 @@ function fmt(dt){ return esc(dt ? String(dt).replace('T',' ').slice(0,16) : '—
 // values below come from our own API but are still user-supplied (email, name, subject)
 // strings; escape them before interpolation so a crafted name cannot inject markup.
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// ── what each square counts ───────────────────────────────────────────────────────
+// A number with no sentence under it makes the reader guess, and a guessed number is
+// worse than no number. Every square names its question, in the same words the label
+// above it uses, so the console explains itself without a legend or a hover.
+const WHY = {
+  'accounts': 'Everyone who can sign in — admins and owners.',
+  'campaigns': 'One campaign per home. A draft with no plan still counts.',
+  'live': 'Building or running right now.',
+  'launched': 'Posts exist for it and at least one is scheduled.',
+  'awaiting build': 'No plan yet, so there is nothing for a human to review.',
+  'budget configured': 'Daily spend the campaign may use. Not money received.',
+  'collected': 'Card payments Stripe has recorded. Zero until a key is added.',
+  'price per campaign': 'What one campaign sells for, set on the server.',
+  'campaigns paid for': 'Orders Stripe reports as paid.',
+  'last order': 'Newest payment. Blank means nobody has bought yet.',
+  'posts': 'Every post written, across every campaign.',
+  'due for the publisher': 'Approved and dated on or before now, waiting to send.',
+  'waiting on a human': 'Written, but nobody has approved or rejected it yet.',
+  'approved by a human': 'A person approved it; it has no publish date yet.',
+  'queued with a date': 'Approved and dated for later.',
+  'actually posted': 'Meta returned a post id — the only proof it really went out.',
+  'publish failed': 'Meta returned an error, or the post’s media file was missing.',
+  'next publish': 'The soonest date on the queue.',
+  'photos': 'Uploaded or imported, whether a campaign uses them or not.',
+  'photos on a campaign': 'These are the photos that can appear in a post.',
+  'designs': 'Images the engine drew because a listing photo was missing.',
+  'ad accounts': 'Meta ad accounts linked through OAuth.',
+  'live tokens': 'Accounts whose token Meta still accepts.',
+  'simulated': 'No real Meta login, so the ad numbers are placeholders.',
+  'need reconnect': 'Meta rejected the token; this account cannot publish.',
+  'token state (last sweep)': 'What the last health sweep got back from Meta.',
+  'platforms': 'Ad platforms this workspace has an account on.',
+  // the work queue reads from the same dictionary
+  'Waiting on us': 'A client wrote in and nobody has answered yet.',
+  'Posts need us': 'Approved and due now, or Meta refused them.',
+  'Awaiting build': 'Waiting on the engine to write a plan for this campaign.',
+  'Reconnect': 'Meta rejected the token; nothing publishes until it is renewed.'
+};
+function whyFor(l){ return WHY[l] ? '<div class="w">' + esc(WHY[l]) + '</div>' : ''; }
 // Everything below interpolates API values through esc() (or through fmt(), which escapes)
 // before it reaches innerHTML, so a crafted name, subject or reply cannot inject markup.
-function stat(n, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (n === null || n === undefined ? '—' : esc(n)) + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>'; }
+function stat(n, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (n === null || n === undefined ? '—' : esc(n)) + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + whyFor(l) + '</div>'; }
 // For tiles whose value is already safe HTML built by pills() (each value escaped there):
 // escaping the whole thing again would print the markup instead of the pills.
-function statRaw(html, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (html || '—') + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + '</div>'; }
+function statRaw(html, l, cls, sub){ return '<div class="stat ' + (cls||'') + '"><div class="n">' + (html || '—') + '</div><div class="l">' + esc(l) + '</div>' + (sub ? '<div class="s">' + esc(sub) + '</div>' : '') + whyFor(l) + '</div>'; }
 function kv(k, v, cls){ return '<div><span class="k">' + esc(k) + '</span><span class="v ' + (cls||'') + '">' + v + '</span></div>'; }
 function pills(obj){
   const parts = Object.entries(obj || {}).map(([k,v]) => '<span class="pill">' + esc(k) + ' ' + esc(v) + '</span>');
@@ -453,7 +494,7 @@ function renderTriage(m){
   $('triage').innerHTML = tiles.map(([sec, label, d, note]) =>
     '<button class="tile ' + (d.n ? 'on' : 'zero') + '" data-go="' + sec + '">' +
       '<div class="n">' + esc(d.n) + '</div><div class="l">' + esc(label) + '</div>' +
-      '<div class="s">' + esc(d.n ? note : 'nothing waiting') + (d.hidden ? ' · ' + esc(d.hidden) + ' test hidden' : '') + '</div>' +
+      '<div class="s">' + esc(d.n ? note : 'nothing waiting') + (d.hidden ? ' · ' + esc(d.hidden) + ' test hidden' : '') + '</div>' + whyFor(label) +
     '</button>').join('');
 }
 
