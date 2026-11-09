@@ -15,6 +15,14 @@ from app.core.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.access import parse_allowlist, signup_block_reason  # noqa: E402
 
+# The suite reuses this repo's dev database, which may predate a column the User model now
+# maps. Startup does this in the running app; a bare TestClient does not fire startup.
+from app.db.session import Base, engine  # noqa: E402
+from app.db.migrate import migrate  # noqa: E402
+
+Base.metadata.create_all(bind=engine)
+migrate()
+
 FAILS = []
 
 
