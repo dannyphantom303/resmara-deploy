@@ -16,7 +16,10 @@ async function syncLiveCampaigns(){
  try{
   const rows=await RM.boosts();
   const list=Array.isArray(rows)?rows:(rows&&rows.boosts)||[];
-  const before=state.campaigns.map(c=>String(campaignBoostId(c))).join(',');
+  // Signature includes the cover photo: a card that swaps stock art for the property photo is
+  // a visible change and must repaint, even though the campaign list itself is unchanged.
+  const signature=list=>list.map(c=>[campaignBoostId(c),c.image||'',c.status].join(':')).join(',').slice(0,4000);
+  const before=signature(state.campaigns);
   list.forEach(b=>{
    if(!b||b.id==null)return;
    const card={address:b.address,area:(b.campaign_days||14)+'-day campaign · $'+Number(b.ad_budget_usd||0).toFixed(0)+'/day',status:liveStatusLabel(b),boostId:b.id,live:true,day:0,posts_total:b.posts_total||0,posts_approved:b.posts_approved||0,posts_published:b.posts_published||0,url:'',media:'',image:b.image||undefined,budget:'$'+Number(b.ad_budget_usd||0).toFixed(0)+'/day'};
@@ -24,7 +27,7 @@ async function syncLiveCampaigns(){
    if(existing)Object.assign(existing,card);else state.campaigns.push(card);
   });
   persist();
-  if(before!==state.campaigns.map(c=>String(campaignBoostId(c))).join(',')&&typeof view!=='undefined'&&view==='campaigns')campaignList();
+  if(before!==signature(state.campaigns)&&typeof view!=='undefined'&&view==='campaigns')campaignList();
  }catch(e){}
 }
 function campaignList(){
