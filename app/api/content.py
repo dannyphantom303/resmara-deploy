@@ -4,6 +4,7 @@ Every number this module returns is either read from the database or pulled from
 Meta Graph API. Where Meta has not shared data yet it says so (source='unavailable')
 instead of inventing a figure - the old formula-based report numbers are gone.
 """
+import mimetypes
 import os
 import shutil
 import uuid
@@ -56,6 +57,34 @@ def _save_upload(file: UploadFile) -> tuple[str, str, int]:
     return filename, f"/uploads/{filename}", os.path.getsize(filepath)
 
 
+# A free-tier instance rebuilds its disk on every deploy, so the uploaded bytes live in the
+# Asset row too — that is what keeps a published photo (or an uploaded video ad) from turning
+# into a 404 the day after it was posted. Video is included on purpose: a campaign that plans
+# a video slot needs the file to survive as reliably as a photo. The cap keeps a single upload
+# from eating the 1 GB database the whole product shares.
+KEEP_IN_DB = ("image/", "video/")
+MAX_KEPT_BYTES = 24 * 1024 * 1024
+
+
+def _blob_for(file: UploadFile, filename: str, size: int) -> tuple[bytes | None, str | None]:
+    """The bytes to keep beside the row, and the content type to serve them back as."""
+    ctype = (file.content_type or "").split(";")[0].strip().lower()
+    if not ctype.startswith(KEEP_IN_DB):
+        ctype = mimetypes.guess_type(filename)[0] or ""
+    if not ctype.startswith(KEEP_IN_DB):
+        return None, None
+    if size > MAX_KEPT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="That file is %d MB; uploads up to %d MB are kept with the campaign."
+                   % (size // (1024 * 1024), MAX_KEPT_BYTES // (1024 * 1024)))
+    try:
+        with open(os.path.join(UPLOAD_DIR, filename), "rb") as fh:
+            return fh.read(), ctype
+    except OSError:
+        return None, ctype
+
+
 # --- Photo upload -------------------------------------------------------------
 
 @router.post("/upload/photo", status_code=201)
@@ -68,14 +97,7 @@ async def upload_photo(file: UploadFile = File(...), boost_id: int = Form(None),
     filename, url, size = _save_upload(file)
     # Keep the bytes with the row as well: uploads/ is lost on the next deploy of a
     # free-tier instance, and a photo post then renders a broken image.
-    blob = None
-    ctype = file.content_type if (file.content_type or "").startswith("image/") else None
-    if ctype:
-        try:
-            with open(os.path.join(UPLOAD_DIR, filename), "rb") as fh:
-                blob = fh.read()
-        except OSError:
-            blob = None
+    blob, ctype = _blob_for(file, filename, size)
     asset = Asset(user_id=current_user.id, boost_id=boost_id, filename=filename, url=url,
                   original_name=os.path.basename(file.filename or ""), kind=kind,
                   data=blob, content_type=ctype)
@@ -96,8 +118,10 @@ async def upload_many(boost_id: int = Form(None), kind: str = Form("photo"),
     out = []
     for f in files:
         filename, url, size = _save_upload(f)
+        blob, ctype = _blob_for(f, filename, size)
         asset = Asset(user_id=current_user.id, boost_id=boost_id, filename=filename, url=url,
-                      original_name=os.path.basename(f.filename or ""), kind=kind)
+                      original_name=os.path.basename(f.filename or ""), kind=kind,
+                      data=blob, content_type=ctype)
         db.add(asset)
         db.commit()
         db.refresh(asset)
