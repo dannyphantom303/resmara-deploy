@@ -83,9 +83,18 @@ function submitTestClient(form,creating){
    account=await RM.login(email,password);
    if(account&&account.access_token)RM.setToken(account.access_token);
   }
-  state={name:(account&&account.name)||name,email,clientSignedIn:true,campaigns:[],connected:false};
+  // A sign-in is an identity change, not an erasure. This used to be `state = {...blank}`,
+  // which threw away the brand profile, uploaded logo/headshot and any campaign the customer
+  // had just built while signed out - the work vanished the moment they signed in.
+  state={...state,name:(account&&account.name)||state.name||name,email,clientSignedIn:true,campaigns:state.campaigns||[],connected:!!state.connected};
   try{localStorage.setItem('resmara',JSON.stringify(state))}catch{}
   modal.close();dashboard();toast('Signed in as '+email);
+  if(window.RM&&RM.brandProfile){RM.brandProfile().then(remote=>{
+    if(!remote||typeof remote!=='object')return;
+    // The account's own profile, if it has one, is the copy to keep - it is the one that
+    // survives a cleared browser. Local-only brand still wins until the server is told.
+    if(!state.brand||!Object.keys(state.brand||{}).length){state.brand={...remote};persist();if(view==='brand')myBrand()}
+  }).catch(()=>{})}
  })().catch(e=>{
   if(e&&e.status){ // a real API answer (400/401/403): show the server's reason
    status.textContent=e.message||'Login failed';
@@ -149,7 +158,18 @@ function brandProfileForm(onboarding){
  if(onboarding)return `<form onsubmit="saveBrandBasics(event,this)"><div class="brand-fields">${text('agent','Agent name',b.agent,true)}${text('license','Agent license number',b.license,true)}${text('website','Personal, team or brokerage website',b.website,true,'url')}</div><p class="fine">Use the website that best represents the brand you want on your listings.</p><p class="fine" data-brand-error role="alert"></p><div class="modal-actions"><button class="campaign-primary">Save and continue →</button></div></form>`;
  const suggestion=b.suggestion||{};
  const asset=(kind,label)=>{const current=state.brandMedia?.[b[kind+'Id']];return `<div class="brand-upload"><label class="field">${label} (optional)<input name="${kind}" type="file" accept="image/png,image/jpeg,image/webp"></label>${current?`<img src="${esc(current)}" alt="Saved ${label.toLowerCase()}"><label class="brand-remove"><input type="checkbox" name="remove_${kind}"> Remove saved image</label>`:''}</div>`};
- return `<form onsubmit="saveBrandProfile(event,this,${onboarding})">${b.suggestion?'<p class="notice checkout-notice">Website research draft. Review the suggested details below and save to use them in future campaigns.</p>':''}<div class="brand-fields">${text('agent','Agent name',b.agent,true)}${text('company','Brokerage',b.brokerage||suggestion.brokerage)}${text('license','Agent license number',b.license)}${text('website','Website',b.website,true,'url')}${text('market','Markets you serve',b.market||suggestion.market)}${text('colours','Brand colours',b.colours||b.colour||suggestion.colours)}${text('brandLink','Public social or brand guide URL (optional)',b.brandLink,false,'url')}<label class="field">Social voice and style<textarea name="voice" rows="2" placeholder="Warm, direct, neighbourhood-focused">${esc(b.voice||suggestion.voice)}</textarea></label>${asset('logo','Logo')}${asset('headshot','Headshot')}</div><p class="fine">PNG, JPEG, or WebP, up to 500 KB per image. This demo stores your profile in this browser.</p><p class="fine" data-brand-error role="alert"></p><div class="modal-actions"><button class="campaign-primary">${onboarding?'Save brand and continue →':'Save My Brand'}</button></div></form>`;
+ return `<form onsubmit="saveBrandProfile(event,this,${onboarding})">${b.suggestion?'<p class="notice checkout-notice">Website research draft. Review the suggested details below and save to use them in future campaigns.</p>':''}<div class="brand-fields">${text('agent','Agent name',b.agent,true)}${text('company','Brokerage',b.brokerage||suggestion.brokerage)}${text('license','Agent license number',b.license)}${text('website','Website',b.website,true,'url')}${text('market','Markets you serve',b.market||suggestion.market)}${text('colours','Brand colours',b.colours||b.colour||suggestion.colours)}${text('brandLink','Public social or brand guide URL (optional)',b.brandLink,false,'url')}<label class="field">Social voice and style<textarea name="voice" rows="2" placeholder="Warm, direct, neighbourhood-focused">${esc(b.voice||suggestion.voice)}</textarea></label>${asset('logo','Logo')}${asset('headshot','Headshot')}</div><p class="fine">PNG, JPEG, or WebP, up to 500 KB per image. Your details are saved to your account; a logo or headshot stays in this browser.</p><p class="fine" data-brand-error role="alert"></p><div class="modal-actions"><button class="campaign-primary">${onboarding?'Save brand and continue →':'Save My Brand'}</button></div></form>`;
+}
+// The profile also lives on the account, so clearing this browser or signing in on another
+// machine does not lose what the customer typed. Images stay in the browser's own copy.
+function pushBrandToAccount(brand,name,company){
+ if(!window.RM||!RM.saveBrandProfile||!RM.isLoggedIn())return Promise.resolve(false);
+ const payload={...(brand||{})};
+ if(name&&!payload.agent)payload.agent=name;
+ // The brokerage is held as state.company in this app but belongs to the profile: without
+ // it a restored profile has no brokerage line on the creative.
+ if(company&&!payload.brokerage)payload.brokerage=company;
+ return RM.saveBrandProfile(payload).then(()=>true).catch(()=>false);
 }
 function saveBrandBasics(event,form){
  event.preventDefault();
@@ -161,6 +181,7 @@ function saveBrandBasics(event,form){
  const next={...state,name,brand};
  try{localStorage.setItem('resmara',JSON.stringify(next))}catch{error.textContent='This browser couldn’t save your brand.';return}
  state=next;onboard(1);
+ pushBrandToAccount(brand,name);
  draftWebsiteBrand(next,name,website);
 }
 // Brand suggestions are drafted by the campaign engine when a campaign is built (the
@@ -193,7 +214,8 @@ async function saveBrandProfile(event,form,onboarding){
   const next={...state,name,company,brand,brandMedia};
   try{localStorage.setItem('resmara',JSON.stringify(next))}catch{throw new Error('This browser couldn’t save the profile. Try smaller images or use the Chrome preview.')}
   Object.assign(state,next);
-  if(onboarding)onboard(1);else{myBrand();toast('Brand profile saved.')}
+  const synced=await pushBrandToAccount(brand,name,company);
+  if(onboarding)onboard(1);else{myBrand();toast(synced?'Brand profile saved to your account.':'Brand profile saved in this browser — sign in to keep it on your account.')}
  }catch(e){error.textContent=e.message}finally{button.disabled=false}
 }
 function runMetaAudit(scenario){

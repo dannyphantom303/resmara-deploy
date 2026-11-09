@@ -26,6 +26,10 @@ class User(Base):
     subscription_status = Column(String, default="inactive")
     last_login = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # The customer's brand profile (agent name, brokerage, colours, voice, website...).
+    # Until this column existed the profile lived only in one browser's localStorage, so
+    # clearing storage or signing in on another machine lost work the customer had done.
+    brand = Column(JSON, default=dict)
 
 # --- Ad Account (OAuth) ---
 class AdAccount(Base):

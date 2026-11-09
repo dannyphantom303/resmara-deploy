@@ -1,5 +1,6 @@
 """Accounts: register, login, profile, and the password-reset flow."""
 import hashlib
+import json
 import secrets
 from datetime import datetime, timedelta
 
@@ -86,6 +87,33 @@ def change_password(current_password: str, new_password: str,
                                    PasswordReset.used_at.is_(None)).update({"used_at": datetime.utcnow()})
     db.commit()
     return {"status": "password_changed"}
+
+
+@router.get("/me/brand")
+def get_my_brand(current_user: User = Depends(get_current_user)):
+    """The brand profile that belongs to this account, wherever it was typed."""
+    return {"brand": current_user.brand or {}}
+
+
+@router.put("/me/brand")
+def put_my_brand(payload: dict, current_user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    """Keep the profile on the account, not only in one browser's localStorage.
+
+    Text fields only: a logo or headshot is an image the customer uploads, and those stay
+    in the browser's own copy (the form says so). 32 KB is generous for eight text fields
+    and small enough that a bad client cannot stuff the row.
+    """
+    brand = (payload or {}).get("brand")
+    if not isinstance(brand, dict):
+        raise HTTPException(status_code=400, detail="brand must be a JSON object")
+    if len(json.dumps(brand)) > 32_000:
+        raise HTTPException(status_code=413, detail="brand profile is too large (32 KB limit)")
+    cleaned = {k: v for k, v in brand.items() if isinstance(k, str) and isinstance(v, (str, int, float, bool, list))}
+    current_user.brand = cleaned
+    db.commit()
+    db.refresh(current_user)
+    return {"brand": current_user.brand or {}}
 
 
 def _hash(token: str) -> str:

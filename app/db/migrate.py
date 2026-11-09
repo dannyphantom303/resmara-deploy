@@ -9,6 +9,10 @@ from app.db.session import engine
 
 # table -> [(column, DDL type/definition)]
 ADDITIONS = {
+    # A brand profile the customer entered has to outlive the browser it was typed in.
+    "users": [
+        ("brand", "JSON"),
+    ],
     "ad_accounts": [
         ("refresh_token", "TEXT"),
         ("token_expires_at", "DATETIME"),

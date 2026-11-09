@@ -43,6 +43,12 @@ check("the allowlist parser accepts commas, spaces and semicolons",
       parse_allowlist("a@x.com, b@x.com; c@x.com\nd@x.com") == {"a@x.com", "b@x.com", "c@x.com", "d@x.com"})
 
 # ---- through the real endpoint -------------------------------------------------------
+# TestClient without a context manager does not run startup, so the idempotent column pass
+# that the live app does at boot has to happen here; otherwise a database created before a
+# column existed answers with "no such column: users.brand".
+from app.db.migrate import migrate  # noqa: E402
+
+migrate()
 client = TestClient(app)
 before = (settings.SIGNUP_EMAILS, settings.SIGNUP_CODE, settings.ADMIN_EMAILS)
 try:

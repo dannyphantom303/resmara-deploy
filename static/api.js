@@ -377,6 +377,19 @@
     return request('/api/oauth/meta/connect');
   }
 
+  // The customer's brand profile, kept on the account so it is not lost with a browser.
+  function brandProfile() {
+    return request('/api/auth/me/brand').then(function (r) { return (r && r.brand) || {}; });
+  }
+
+  function saveBrandProfile(brand) {
+    return request('/api/auth/me/brand', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brand: brand || {} }),
+    }).then(function (r) { return (r && r.brand) || {}; });
+  }
+
   function adAccounts() {
     return request('/api/ad-accounts');
   }
@@ -472,6 +485,8 @@
     createTicket: createTicket,
     tickets: tickets,
     metaConnect: metaConnect,
+    brandProfile: brandProfile,
+    saveBrandProfile: saveBrandProfile,
     adAccounts: adAccounts,
     checkConnections: checkConnections,
     checkHealth: checkHealth,

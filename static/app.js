@@ -120,6 +120,16 @@ if(location.hash==='#pricing'||(!location.hash&&document.body.dataset.page==='pr
 // A token that has already passed its expiry is dropped by RM.isLoggedIn(), so this only
 // asks when there is a real session to ask about.
 if(window.RM&&RM.isLoggedIn())RM.me().then(u=>{if(u&&u.email){state.name=u.name||state.name;state.email=u.email;state.clientSignedIn=true;persist()}}).catch(()=>{});
+// A profile kept on the account is the one that survives a cleared browser; a browser with
+// no local brand takes it back rather than showing an empty My Brand form.
+if(window.RM&&RM.isLoggedIn()&&RM.brandProfile)RM.brandProfile().then(remote=>{
+ if(!remote||!Object.keys(remote).length)return;
+ if(state.brand&&Object.keys(state.brand).length)return;
+ state.brand={...remote};
+ if(remote.brokerage&&!state.company)state.company=remote.brokerage;
+ if(remote.agent&&!state.name)state.name=remote.agent;
+ persist();if(view==='brand')myBrand();
+}).catch(()=>{});
 // When the backend stops accepting the session, say so once and stop pretending to be signed in.
 if(window.RM&&RM.onSessionLost)RM.onSessionLost(()=>{
  state.clientSignedIn=false;persist();
