@@ -52,7 +52,7 @@ nav#index a[aria-current="true"]{background:var(--wash);color:var(--blue)}
 .topbar .sp{flex:1}
 .topbar .who{font-size:12px;color:var(--muted)}
 .tlink{font-size:12px;font-weight:600;color:var(--blue);text-decoration:none;white-space:nowrap}
-.tools{display:flex;align-items:center;gap:14px}
+.tools{display:flex;align-items:center;gap:14px;margin-left:2px;border-left:1px solid var(--hair);padding-left:14px}
 .tools.hidden{display:none}
 .badge.hidden{display:none}
 .badge{font-size:10px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;color:var(--blue);
@@ -99,7 +99,7 @@ details.card[open]>summary{border-bottom:0}
 .stat .n{font-size:26px;font-weight:700;line-height:1.12;letter-spacing:-.9px;color:var(--ink)}
 .stat .l{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin-top:2px}
 .stat .s{font-size:11px;color:#7c93a3;margin-top:3px;line-height:1.45}
-.stat.wide .n{font-size:15.5px;font-weight:600;letter-spacing:-.2px}
+.stat.wide .n{font-size:22px;font-weight:700;letter-spacing:-.7px;line-height:1.2}
 .rows div{display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:13px;align-items:baseline}
 .rows div:last-child{border-bottom:0}
 .rows .k{flex:0 0 190px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
@@ -173,6 +173,11 @@ tr.testrow td{background:#fbfdff;color:#849bae}
 
 /* ── phones: the column folds into a header strip ─────────────────────────── */
 @media(max-width:880px){
+  .topbar{padding:10px 16px}
+  #crumbWrap,.crumb{display:none}
+  .tools{margin-left:0;border-left:0;padding-left:0;gap:11px}
+  .tlink{font-size:11.5px}
+  button.ghost.tiny{padding:6px 11px;font-size:12px}
   .shell{display:block}
   .side{position:static;width:auto;flex:none;height:auto;padding:16px 18px 12px;display:block}
   .mark{font-size:19px}
@@ -224,7 +229,7 @@ tr.testrow td{background:#fbfdff;color:#849bae}
       <span id="statusPill"></span>
       <span class="who" id="who"></span>
       <span class="tools hidden" id="tools"><a href="#" id="collapseAll" class="tlink">Collapse all</a> <a href="#" id="reloadAll" class="tlink">Refresh</a></span>
-      <button class="ghost hidden" id="logout">Sign out</button>
+      <button class="ghost tiny hidden" id="logout">Sign out</button>
     </div>
 
 <main>
