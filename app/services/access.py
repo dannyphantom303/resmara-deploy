@@ -30,15 +30,16 @@ def parse_allowlist(raw: str | None) -> set[str]:
 
 
 def signup_block_reason(email: str, invite_code: str | None, allowlist: str | None,
-                        expected_code: str | None) -> str | None:
+                        expected_code: str | None, admins: str | None = None) -> str | None:
     """None when this signup may proceed, otherwise the message to show the person.
 
     A configured code is compared in constant time; an unset code never blocks, which keeps
     a fresh environment usable. An allowlisted address skips the code entirely, so losing the
-    code does not lock the owners out of their own product.
+    code does not lock the owners out of their own product. Owners (ADMIN_EMAILS) are always
+    allowed: locking the operator out of their own signup page is never the right answer.
     """
     who = (email or "").strip().lower()
-    allowed = parse_allowlist(allowlist)
+    allowed = parse_allowlist(allowlist) | parse_allowlist(admins)
     code = (expected_code or "").strip()
 
     if allowed and who in allowed:

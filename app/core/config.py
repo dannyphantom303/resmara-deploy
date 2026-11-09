@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     SIGNUP_EMAILS: str = os.getenv("RESMARA_SIGNUP_EMAILS", "")
     SIGNUP_CODE: str = os.getenv("RESMARA_SIGNUP_CODE", "")
 
+    # Owners. An address here can always sign up (no invite code) and comes out of
+    # registration as an operator, and an existing account on this list is promoted at
+    # login — so adding a second operator is an env-var edit, not a database script.
+    ADMIN_EMAILS: str = os.getenv("RESMARA_ADMIN_EMAILS", "")
+
     # Where this app is publicly reachable. Needed for Meta callbacks AND for Instagram,
     # which fetches post media by URL (Graph has no direct file upload for IG feed posts).
     # Hosts that inject their own public origin need no configuration at all: Render sets

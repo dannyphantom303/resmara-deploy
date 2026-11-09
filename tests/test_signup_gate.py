@@ -44,10 +44,11 @@ check("the allowlist parser accepts commas, spaces and semicolons",
 
 # ---- through the real endpoint -------------------------------------------------------
 client = TestClient(app)
-before = (settings.SIGNUP_EMAILS, settings.SIGNUP_CODE)
+before = (settings.SIGNUP_EMAILS, settings.SIGNUP_CODE, settings.ADMIN_EMAILS)
 try:
     settings.SIGNUP_EMAILS = "owner@example.com"
     settings.SIGNUP_CODE = "beta-code-123"
+    settings.ADMIN_EMAILS = "second.owner@example.com"
 
     blocked = client.post("/api/auth/register", json={
         "email": "stranger@example.com", "password": "Hunter2Hunter2", "name": "Stranger"})
@@ -66,15 +67,45 @@ try:
         "email": "owner@example.com", "password": "Hunter2Hunter2"})
     check("an allowlisted owner needs no code", owner.status_code == 201, owner.text[:120])
 
+    # A second operator is an env-var edit, not a database script: the address signs up
+    # without an invite code and comes out of registration already an operator.
+    second = client.post("/api/auth/register", json={
+        "email": "second.owner@example.com", "password": "Hunter2Hunter2", "name": "Second"})
+    check("a listed operator signs up without an invite", second.status_code == 201, second.text[:160])
+    check("and is an operator immediately", second.json().get("is_admin") is True, str(second.json()))
+    first = client.post("/api/auth/register", json={
+        "email": "plain@example.com", "password": "Hunter2Hunter2", "invite_code": "beta-code-123"})
+    check("an ordinary invited account is not an operator",
+          first.status_code == 201 and first.json().get("is_admin") is False, str(first.json())[:160])
+
+    # An account that predates the setting is promoted the next time it signs in.
+    from app.db.session import SessionLocal, User
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.email == "second.owner@example.com").update({"is_admin": False})
+        db.commit()
+    finally:
+        db.close()
+    relogin = client.post("/api/auth/login",
+                          data={"username": "second.owner@example.com", "password": "Hunter2Hunter2"})
+    check("signing in promotes a pre-existing account", relogin.status_code == 200, relogin.text[:120])
+    db = SessionLocal()
+    try:
+        promoted = db.query(User).filter(User.email == "second.owner@example.com").first()
+        check("and the operator flag sticks", bool(promoted and promoted.is_admin), "not admin")
+    finally:
+        db.close()
+
     check("robots.txt keeps the beta out of search",
           client.get("/robots.txt").text.strip().endswith("Disallow: /"), client.get("/robots.txt").text)
 finally:
-    settings.SIGNUP_EMAILS, settings.SIGNUP_CODE = before
+    settings.SIGNUP_EMAILS, settings.SIGNUP_CODE, settings.ADMIN_EMAILS = before
 
     from app.db.session import SessionLocal, User
     db = SessionLocal()
     try:
-        for email in ("partner@example.com", "owner@example.com"):
+        for email in ("partner@example.com", "owner@example.com",
+                      "second.owner@example.com", "plain@example.com"):
             db.query(User).filter(User.email == email).delete()
         db.commit()
     finally:
