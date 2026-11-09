@@ -104,6 +104,10 @@ details.card[open]>summary{border-bottom:0}
 .rows div:last-child{border-bottom:0}
 .rows .k{flex:0 0 190px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
 .rows .v{flex:1;word-break:break-word}
+.stamp{margin-top:9px;font-size:11.5px;color:#7c93a3}
+.stageband{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:var(--paper);
+  border:1px solid var(--hair);border-radius:11px;padding:11px 14px;margin-top:12px}
+.stageband .sl{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin-right:3px}
 h3{font-size:10.5px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--blue);margin:18px 0 9px}
 h3:first-child{margin-top:2px}
 .spark{display:flex;align-items:flex-end;gap:4px;height:64px;margin:8px 0 5px}
@@ -208,6 +212,7 @@ tr.testrow td{background:#fbfdff;color:#849bae}
       <a href="#sec-activity" data-go="activity">Activity</a>
       <a href="#sec-health" data-go="health">Health</a>
       <a href="#sec-checks" data-go="checks">Checks</a>
+      <a href="#sec-notes" data-go="notes">Notes</a>
     </nav>
     <div class="side-foot"><b>Operator console</b>Every figure is read from the database. Where one cannot be read, the section says why.</div>
   </aside>
@@ -217,8 +222,6 @@ tr.testrow td{background:#fbfdff;color:#849bae}
       <div class="crumb"><span>Console</span><i>/</i><b id="crumbNow">Overview</b></div>
       <span class="sp"></span>
       <span id="statusPill"></span>
-      <span class="badge hidden" id="adminBadge">admin</span>
-      <span class="who" id="stamp"></span>
       <span class="who" id="who"></span>
       <span class="tools hidden" id="tools"><a href="#" id="collapseAll" class="tlink">Collapse all</a> <a href="#" id="reloadAll" class="tlink">Refresh</a></span>
       <button class="ghost hidden" id="logout">Sign out</button>
@@ -244,6 +247,7 @@ tr.testrow td{background:#fbfdff;color:#849bae}
       <div class="eyebrow">Project pulse</div>
       <h1>Operator console</h1>
       <p class="sub">Accounts, campaigns, the content pipeline and the money — each figure read from the database, with the reason stated wherever one could not be read.</p>
+      <div class="stamp" id="stamp"></div>
     </div>
     <!-- What is actually waiting on a human, above the fold, before any list. -->
     <div class="triage" id="triage"></div>
@@ -514,8 +518,8 @@ async function loadMetrics(){
         stat(c.live, 'live') + stat(c.launched, 'launched') +
         stat(c.awaiting_build, 'awaiting build', '', c.awaiting_build_test ? c.awaiting_build_test + ' of them test' : '') +
         stat('$' + Number(c.budget_configured_usd || 0).toFixed(2), 'budget configured', 'wide') +
-        statRaw(pills(c.by_stage), 'by stage', 'wide') +
       '</div>' +
+      '<div class="stageband"><span class="sl">Campaigns by stage</span>' + pills(c.by_stage) + '</div>' +
       // Money belongs next to campaigns: one campaign is one $49 purchase.
       (rev.error ? groupError('revenue', rev.error) :
       '<h3 style="margin:14px 0 6px">Money</h3><div class="grid">' +
@@ -745,7 +749,6 @@ async function boot(){
   $('console').classList.remove('hidden');
   $('index').classList.remove('hidden');
   $('logout').classList.remove('hidden');
-  $('adminBadge').classList.remove('hidden');
   $('tools').classList.remove('hidden');
   $('who').textContent = me.email + (me.is_admin ? ' · admin' : ' · NOT admin');
   if (!me.is_admin) {
