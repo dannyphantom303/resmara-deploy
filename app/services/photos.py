@@ -430,78 +430,110 @@ def _trulia_city_url(address: str, zipcode: str) -> str:
     return f"https://www.trulia.com/{m.group(2)}/{city}/"
 
 
-async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None,
-                   address: str = "", zipcode: str = "", trace: list | None = None) -> list[str]:
-    """Gallery photo URLs for a listing, using the site that actually still serves them.
+READER_BASE = "https://r.jina.ai/"          # renders the page on their infrastructure
+READER_TIMEOUT = 90.0
 
-    One fetch per page, no headless browser. Which source is used is decided by host:
 
-      * movoto.com — the listing's own ``__INITIAL_STATE__`` gallery (all photos, 1920px)
-      * trulia.com — JSON-LD gallery upgraded to the 3000px Zillow CDN original
-      * anything else (zillow, realtor, redfin, homes.com, an MLS page) — that page is
-        tried first, and if it is walled or yields nothing, the same property is looked up
-        on Trulia by address. Those hosts block server-side fetches outright; Trulia is
-        the same inventory without the wall.
+async def _fetch_html(client: httpx.AsyncClient, url: str, trace: list | None = None) -> str:
+    """The page's HTML, direct if the site allows it, otherwise through a hosted reader.
 
-    Returns [] rather than raising when a page yields nothing, so the caller can explain
-    the options instead of surfacing an httpx status code.
+    Zillow, Realtor, Redfin, Homes.com, Movoto and Trulia all answer 403 to a datacenter IP
+    (Render is one) while answering 200 to a home connection — so a direct fetch works in
+    local development and fails in production, which is the worst possible split. The reader
+    fetches from its own browser fleet and returns the rendered HTML, scripts and all, so the
+    same parsers run on both. JINA_API_KEY raises the reader's rate limit when set.
     """
-    own = client is None
-    client = client or _client()
-    host = _host(listing_url)
-
-    def note(url, outcome):
-        # A wall is worth reporting: "Movoto answered 403 from our IP" is a fixable fact,
-        # an empty photo list is not.
+    def note(outcome):
         if trace is not None:
             trace.append({"url": url, "outcome": outcome})
 
     try:
-        try:
-            resp = await client.get(listing_url, headers=_CHROME_HEADERS)
-            note(listing_url, resp.status_code)
-            resp.raise_for_status()
-            html = resp.text
-        except httpx.HTTPError as exc:
-            note(listing_url, getattr(getattr(exc, "response", None), "status_code", None) or exc.__class__.__name__)
-            html = ""
+        resp = await client.get(url, headers=_CHROME_HEADERS)
+        note(resp.status_code)
+        if resp.status_code == 200 and len(resp.text) > 2000:
+            return resp.text
+    except httpx.HTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        note(status or exc.__class__.__name__)
 
-        if "movoto.com" in host and html:
-            photos = movoto_photo_urls(html)
-            if photos:
-                return photos[:limit]
-            rows = movoto_listings(html)                    # a city page, not a listing
-            match = match_listing(rows, address, zipcode)
-            if match:
-                detail = await client.get(match["url"], headers=_CHROME_HEADERS)
-                detail.raise_for_status()
-                return movoto_photo_urls(detail.text)[:limit]
+    headers = dict(_CHROME_HEADERS)
+    headers["X-Respond-With"] = "html"
+    key = os.getenv("JINA_API_KEY")
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        reader = await client.get(READER_BASE + url, headers=headers, timeout=READER_TIMEOUT)
+        note("reader:%s" % reader.status_code)
+        if reader.status_code == 200:
+            return reader.text
+    except httpx.HTTPError as exc:
+        note("reader:%s" % exc.__class__.__name__)
+    return ""
 
-        if "trulia.com" in host and html:
-            # 1024px thumbs, not the 3000px originals: a Facebook or Instagram post is
-            # 1080px wide, so the original is ~8x the bytes for detail nobody sees, and on a
-            # free database every campaign's gallery is stored as bytes.
-            photos = trulia_photo_urls(html, full_res=False)
-            if photos:
-                return photos[:limit]
 
-        if html:
-            generic = extract_image_urls(html, str(resp.url), limit=limit)
-            if generic:
-                return generic
-
-        # Walled or empty: same property, friendlier host.
-        city_url = _trulia_city_url(address, zipcode)
-        if city_url and "trulia.com" not in host:
-            city = await client.get(city_url, headers=_CHROME_HEADERS)
-            note(city_url, city.status_code)
-            if city.status_code == 200:
-                match = match_listing(trulia_listings(city.text), address, zipcode)
-                if match:
-                    detail = await client.get(match["url"], headers=_CHROME_HEADERS)
-                    detail.raise_for_status()
-                    return trulia_photo_urls(detail.text, full_res=False)[:limit]
+async def _photos_on_page(client: httpx.AsyncClient, url: str, limit: int,
+                          address: str, zipcode: str, trace: list | None) -> list[str]:
+    html = await _fetch_html(client, url, trace)
+    if not html:
         return []
+    host = _host(url)
+
+    if "movoto.com" in host:
+        photos = movoto_photo_urls(html)
+        if photos:
+            return photos[:limit]
+        match = match_listing(movoto_listings(html), address, zipcode)   # a city page
+        if match:
+            detail = await _fetch_html(client, match["url"], trace)
+            return movoto_photo_urls(detail)[:limit] if detail else []
+
+    if "trulia.com" in host:
+        # 1024px thumbs, not the 3000px originals: a Facebook or Instagram post is 1080px
+        # wide, so the original is ~8x the bytes for detail nobody sees, and on a free
+        # database every campaign's gallery is stored as bytes.
+        photos = trulia_photo_urls(html, full_res=False)
+        if photos:
+            return photos[:limit]
+
+    return extract_image_urls(html, url, limit=limit)
+
+
+async def _trulia_by_address(client: httpx.AsyncClient, address: str, zipcode: str,
+                             limit: int, trace: list | None) -> list[str]:
+    city_url = _trulia_city_url(address, zipcode)
+    if not city_url:
+        return []
+    html = await _fetch_html(client, city_url, trace)
+    match = match_listing(trulia_listings(html), address, zipcode) if html else None
+    if not match:
+        return []
+    return await _photos_on_page(client, match["url"], limit, address, zipcode, trace)
+
+
+async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None,
+                   address: str = "", zipcode: str = "", trace: list | None = None) -> list[str]:
+    """Gallery photo URLs for a listing, from whichever source can still serve them.
+
+    Order of attempts:
+
+      1. the page itself, parsed by its own adapter (Movoto ``__INITIAL_STATE__``,
+         Trulia ``__NEXT_DATA__``) with a generic og:image/JSON-LD/<img> pass for other hosts;
+      2. the same page through a hosted reader, which is what makes production work at all —
+         every listing portal answers 403 to a datacenter IP;
+      3. the same property on Trulia, found by the campaign's own address, because Trulia is
+         the same inventory and its gallery survives the reader where Movoto's does not.
+
+    Returns [] rather than raising when nothing works, so the caller can explain the
+    options instead of surfacing an httpx status code. ``trace`` collects each URL tried
+    with its outcome, which is the difference between a support answer and a shrug.
+    """
+    own = client is None
+    client = client or _client()
+    try:
+        urls = await _photos_on_page(client, listing_url, limit, address, zipcode, trace)
+        if not urls and address:
+            urls = await _trulia_by_address(client, address, zipcode, limit, trace)
+        return urls
     finally:
         if own:
             await client.aclose()

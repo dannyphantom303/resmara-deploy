@@ -143,6 +143,36 @@ def main() -> int:
     check("a zip mismatch is not a match",
           photos.match_listing(rows, "1354 Harpole Rd, Redding, CA", "99999") is None)
 
+    # --- a walled site: direct 403, reader HTML, and the parsers must agree --------------
+    # This is the production shape: Render's IP gets 403 from every listing portal, so the
+    # page has to come back through the reader. If this test passes while production fails,
+    # the difference is which URL the reader was handed.
+    TRULIA_READER_HTML = TRULIA_DETAIL.replace("<html><body>", "<html><body><!-- reader -->")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path if request.url.host != "r.jina.ai" else "reader" + request.url.path)
+        if request.url.host == "r.jina.ai":
+            return httpx.Response(200, text=TRULIA_READER_HTML)
+        return httpx.Response(403, text="blocked")
+
+    async def run():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, follow_redirects=True) as mock:
+            trace = []
+            got = await photos.discover(
+                "https://www.trulia.com/home/1354-harpole-rd-redding-ca-96002-1",
+                limit=5, client=mock, address="1354 Harpole Rd, Redding, CA 96002", trace=trace)
+            return got, trace
+
+    got, trace = asyncio.run(run())
+    check("a 403 is retried through the reader instead of giving up", len(got) == 2, str(got))
+    check("the reader was asked for rendered HTML",
+          any(t.get("outcome") == "reader:200" for t in trace), str(trace))
+    check("and the photos are the gallery, not a hero image", "aaaa1111" in (got[0] if got else ""), str(got))
+    check("the direct request is reported, not hidden",
+          any(t.get("outcome") == 403 for t in trace), str(trace))
+
     # --- download + store, through a mock transport ---------------------------------------
     jpeg = b"\xff\xd8\xff\xe0" + b"0" * 2048
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 1024
