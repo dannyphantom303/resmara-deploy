@@ -5,128 +5,229 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Resmara — Operator Console</title>
 <style>
-:root{--ink:#102c40;--green:#143a50;--lime:#a2c9de;--paper:#f7fbff;--muted:#52778f;--line:#c7e2f2;--bad:#c0392b;--ok:#1f8a4c;--warn:#b7791f}
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Archivo+Black&display=swap');
+/* Same family as the buildroom tracker and the customer site: DM Sans on warm paper,
+   deep navy for the shell, eye-blue for labels and links, one orange for the action that
+   matters. Nothing here is a new hue — the tokens are the site's own. */
+:root{
+  --ink:#102c40; --navy:#143a50; --navy-deep:#123c59; --blue:#087db6; --sky:#c7e2f2;
+  --wash:#e5f4fd; --paper:#f7fbff; --muted:#52778f; --line:#dcebf5; --hair:#eef6fb;
+  --orange:#d94c0d; --orange-deep:#c3440b; --ok:#1f8a4c; --bad:#c0392b; --warn:#a35f45;
+  --r:13px; --shadow:0 4px 16px rgba(38,56,87,.02);
+}
 *{box-sizing:border-box}
-body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink)}
-a{color:#0b6fa4}
-header{position:sticky;top:0;z-index:20;background:var(--green);color:#fff;padding:10px 20px 0}
-header .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-header h1{font-size:17px;margin:0;letter-spacing:.2px}
-header .sp{flex:1}
-header .who{font-size:13px;opacity:.85}
-.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35)}
-/* The whole console is one screen tall until you ask for more: sections fold away, and the
-   index stays visible so folding one in never loses your place. */
-nav{display:flex;gap:8px;align-items:center;overflow-x:auto;padding:9px 0;scrollbar-width:none}
-nav::-webkit-scrollbar{display:none}
-nav a{color:#eaf6ff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 11px;font-size:12.5px;white-space:nowrap;text-decoration:none}
-nav a:hover{background:rgba(255,255,255,.24)}
-nav .grow{flex:1}
-main{max-width:1080px;margin:0 auto;padding:18px 20px 40px}
-.triage{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin-bottom:14px}
-.tile{background:#fff;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;font:inherit;color:inherit;cursor:pointer;box-shadow:0 1px 2px rgba(16,44,64,.05)}
-.tile:hover{border-color:var(--lime)}
-.tile .n{font-size:30px;font-weight:700;line-height:1.05}
-.tile .l{font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.tile .s{font-size:12px;color:var(--muted);margin-top:4px}
-.tile.on{border-left-color:var(--warn);background:#fffdf7}
-.tile.zero .n,.tile.zero .l{color:var(--muted);opacity:.75}
-.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,44,64,.05)}
-.card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
-.card h3{margin:18px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
-.card h3:first-of-type{margin-top:4px}
-details.card{padding:0;overflow:hidden;scroll-margin-top:104px}
-details.card>summary{display:flex;align-items:center;gap:10px;padding:13px 18px;cursor:pointer;list-style:none}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:15px/1.55 'DM Sans',-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{letter-spacing:-.3px}
+.shell{display:flex;min-height:100vh}
+
+/* ── the shell column ─────────────────────────────────────────────────────── */
+.side{flex:0 0 244px;width:244px;background:var(--navy-deep);color:#fff;padding:26px 18px 20px;
+  position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.mark{font-family:'Archivo Black','Arial Black',sans-serif;font-size:22px;letter-spacing:-1.2px;color:#fff;text-decoration:none}
+.mark:hover{text-decoration:none}
+.mark span{color:var(--orange)}
+.mark small{display:block;font-family:'DM Sans',sans-serif;font-size:9px;font-weight:700;letter-spacing:2.6px;
+  color:#a2c9de;margin-top:5px;text-transform:uppercase}
+.side-eyebrow{font-size:9.5px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#7fa6bd;margin:30px 0 8px}
+nav#index{display:grid;gap:2px;overflow:visible}
+nav#index.hidden{display:none}
+nav#index a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#a2c9de;
+  font-size:13px;font-weight:600;text-decoration:none;transition:background .14s,color .14s}
+nav#index a:hover{background:rgba(255,255,255,.07);color:#fff;text-decoration:none}
+nav#index a[aria-current="true"]{background:var(--wash);color:var(--blue)}
+.side-foot{margin-top:auto;border-top:1px solid rgba(255,255,255,.13);padding-top:15px;
+  font-size:11px;line-height:1.6;color:#9fbccd}
+.side-foot b{display:block;color:#fff;font-size:12px;margin-bottom:2px}
+
+/* ── top bar and page head ────────────────────────────────────────────────── */
+.main{flex:1;min-width:0;min-height:100vh;background:var(--paper)}
+.topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;
+  border-bottom:1px solid var(--hair);padding:13px 30px;position:sticky;top:0;z-index:20}
+.crumb{font-size:13px;color:var(--muted)}
+.crumb i{font-style:normal;opacity:.45;margin:0 7px}
+.crumb b{color:var(--ink);font-weight:600}
+.topbar .sp{flex:1}
+.topbar .who{font-size:12px;color:var(--muted)}
+.tlink{font-size:12px;font-weight:600;color:var(--blue);text-decoration:none;white-space:nowrap}
+.tools{display:flex;align-items:center;gap:14px}
+.tools.hidden{display:none}
+.badge.hidden{display:none}
+.badge{font-size:10px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase;color:var(--blue);
+  background:var(--wash);border-radius:6px;padding:3px 7px}
+main{max-width:1120px;margin:0 auto;padding:28px 30px 64px}
+.pagehead{margin:0 0 20px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:2.2px;text-transform:uppercase;color:var(--blue)}
+.pagehead h1{font-size:31px;font-weight:700;letter-spacing:-1.4px;line-height:1.1;margin:9px 0 7px}
+.pagehead .sub{margin:0;font-size:14px;color:var(--muted);max-width:660px;line-height:1.65}
+
+/* ── what is waiting on a human ───────────────────────────────────────────── */
+.triage{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:13px;margin:0 0 18px}
+.tile{background:#fff;border:1px solid var(--sky);border-radius:var(--r);box-shadow:var(--shadow);
+  padding:15px 17px 14px;text-align:left;font:inherit;color:inherit;cursor:pointer;
+  display:grid;gap:3px;transition:border-color .14s,transform .14s,box-shadow .14s}
+.tile:hover{border-color:#9fd2ea;transform:translateY(-1px);box-shadow:0 8px 20px rgba(38,56,87,.06)}
+.tile .n{font-size:31px;font-weight:700;line-height:1;letter-spacing:-1.4px;color:var(--ink)}
+.tile .l{font-size:12.5px;font-weight:600;color:var(--ink);margin-top:3px}
+.tile .s{font-size:11px;color:var(--muted);line-height:1.45}
+.tile.on{border-color:#f2ccb8;background:#fff8f4}
+.tile.on .n{color:var(--orange)}
+.tile.zero .n{color:#bccfdd}
+.tile.zero .l{color:var(--muted)}
+
+/* ── cards and their folded headers ───────────────────────────────────────── */
+.card{background:#fff;border:1px solid var(--sky);border-radius:var(--r);box-shadow:var(--shadow);
+  padding:18px 20px;margin:0 0 15px}
+.card>h2{font-size:22px;font-weight:700;letter-spacing:-.6px;margin:0 0 14px;color:var(--ink)}
+details.card{padding:0;overflow:hidden;scroll-margin-top:96px}
+details.card>summary{display:flex;align-items:center;gap:12px;padding:15px 20px;cursor:pointer;list-style:none}
 details.card>summary::-webkit-details-marker{display:none}
-details.card>summary h2{margin:0;flex:0 0 auto}
-details.card>summary:hover{background:var(--paper)}
-.secsum{flex:1;text-align:right;font-size:12.5px;color:var(--muted)}
-.secsum b{color:var(--warn)}
-.chev{color:var(--muted);transition:transform .15s}
+details.card>summary:hover{background:#fbfdff}
+details.card>summary h2{margin:0;flex:0 0 auto;font-size:16px;font-weight:700;letter-spacing:-.35px;color:var(--ink)}
+.secsum{flex:1;text-align:right;font-size:12px;color:var(--muted)}
+.secsum b{color:var(--orange);font-weight:700}
+.chev{color:#9fbccd;font-size:15px;transition:transform .16s}
 details[open]>summary .chev{transform:rotate(90deg)}
-details.card>.body{padding:0 18px 16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-.stat{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px}
-.stat .n{font-size:26px;font-weight:700;line-height:1.1}
-.stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.stat .s{font-size:11.5px;color:var(--muted);margin-top:2px}
-.stat.wide .n{font-size:16px;font-weight:600}
-.rows div{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+details.card>.body{padding:2px 20px 18px;border-top:1px solid var(--hair);padding-top:15px}
+details.card[open]>summary{border-bottom:0}
+
+/* ── figures ──────────────────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px}
+.stat{background:var(--paper);border:1px solid var(--hair);border-radius:11px;padding:13px 14px}
+.stat .n{font-size:26px;font-weight:700;line-height:1.12;letter-spacing:-.9px;color:var(--ink)}
+.stat .l{font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.stat .s{font-size:11px;color:#7c93a3;margin-top:3px;line-height:1.45}
+.stat.wide .n{font-size:15.5px;font-weight:600;letter-spacing:-.2px}
+.rows div{display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:13px;align-items:baseline}
 .rows div:last-child{border-bottom:0}
-.rows .k{flex:0 0 190px;color:var(--muted)}
+.rows .k{flex:0 0 190px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
 .rows .v{flex:1;word-break:break-word}
-.spark{display:flex;align-items:flex-end;gap:4px;height:60px;margin:6px 0 4px}
-.spark i{flex:1;background:var(--lime);border-radius:3px 3px 0 0;min-height:2px}
-.spark i:hover{background:var(--green)}
-.spark-axis{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
-label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.5px}
-input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)}
-textarea{min-height:70px;resize:vertical}
-button{padding:10px 16px;border:0;border-radius:8px;background:var(--ink);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
-button.tiny{padding:5px 10px;font-size:12.5px;font-weight:600}
-button:disabled{opacity:.55;cursor:default}
-table{width:100%;border-collapse:collapse;font-size:13.5px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+h3{font-size:10.5px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--blue);margin:18px 0 9px}
+h3:first-child{margin-top:2px}
+.spark{display:flex;align-items:flex-end;gap:4px;height:64px;margin:8px 0 5px}
+.spark i{flex:1;background:var(--sky);border-radius:3px 3px 0 0;min-height:2px;transition:background .14s}
+.spark i:hover{background:var(--blue)}
+.spark-axis{display:flex;justify-content:space-between;font-size:11px;color:#7c93a3}
+
+/* ── controls ─────────────────────────────────────────────────────────────── */
+label{display:block;font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+  color:var(--muted);margin:10px 0 5px}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--sky);border-radius:10px;
+  font:inherit;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid #cfe9f8;outline-offset:1px;border-color:#9fd2ea}
+textarea{min-height:74px;resize:vertical}
+button{padding:11px 19px;border:0;border-radius:10px;background:var(--orange);color:#fff;font:inherit;
+  font-weight:700;cursor:pointer;transition:filter .14s,transform .14s}
+button:hover{filter:brightness(1.06)}
+button:active{transform:translateY(1px)}
+button.ghost{background:#fff;color:var(--blue);border:1px solid var(--sky);font-weight:600}
+button.ghost:hover{border-color:#9fd2ea;background:#fbfdff}
+button.tiny{padding:6px 11px;font-size:12px;font-weight:600}
+button:disabled{opacity:.55;cursor:default;transform:none}
+
+/* ── tables and filters ───────────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--hair);vertical-align:top}
+th{color:#7c93a3;font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase}
+tbody tr:hover td{background:#fbfdff}
 .scrollx{overflow-x:auto}
-.pill{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:var(--paper);white-space:nowrap}
-.pill.ok{color:var(--ok);border-color:#bfe3cd;background:#f0faf4}
-.pill.bad{color:var(--bad);border-color:#f0c9c4;background:#fdf2f0}
-.pill.warn{color:var(--warn);border-color:#f0e0bd;background:#fdf9ef}
-.pill.test{color:var(--muted);border-color:var(--line);background:#fff}
-.msg{margin-top:10px;font-size:13.5px}
-.msg.bad{color:var(--bad)}.msg.ok{color:var(--ok)}
-.hint{font-size:12.5px;color:var(--muted)}
-code{background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px}
+.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.chip{font:inherit;font-size:12px;font-weight:600;padding:6px 13px;border-radius:999px;
+  border:1px solid var(--sky);background:#fff;color:var(--muted);cursor:pointer}
+.chip:hover{border-color:#9fd2ea;color:var(--blue)}
+.chip[aria-pressed="true"]{background:var(--wash);border-color:#bfe0f2;color:var(--blue)}
+.chipbox{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:var(--muted);
+  text-transform:none;letter-spacing:0;white-space:nowrap;font-weight:500}
+.chipbox input{width:auto}
+.filters input[type=search]{max-width:260px;padding:8px 12px;font-size:13px}
+
+/* ── states ───────────────────────────────────────────────────────────────── */
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;
+  background:var(--wash);color:var(--blue);white-space:nowrap}
+.pill.ok{background:#eaf7ef;color:var(--ok)}
+.pill.bad{background:#fdeeea;color:var(--bad)}
+.pill.warn{background:#fff0e3;color:var(--warn)}
+.pill.test{background:#f3f7fa;color:#7c93a3}
+.pill.admin{background:#fff0e3;color:var(--warn)}
+.msg{margin:10px 0 0;font-size:13px}
+.msg.bad{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+.hint{font-size:12px;color:var(--muted);line-height:1.6}
+code{background:var(--paper);border:1px solid var(--hair);border-radius:6px;padding:1px 6px;
+  font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .hidden{display:none}
 .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
 .row>div{flex:1;min-width:180px}
-/* Filters sit above the tables they narrow: one row of controls, so nobody scrolls to
-   change what a list is showing. */
-.filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 10px}
-.chip{font:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer}
-.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
-.chipbox{display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px;color:var(--muted);text-transform:none;letter-spacing:0;white-space:nowrap}
-.chipbox input{width:auto}
-.filters input[type=search]{max-width:260px;padding:6px 10px;font-size:13px}
-tr.testrow td{background:#fbfdff;color:#7c93a3}
-.thread{border-left:2px solid var(--line);margin:6px 0 10px;padding-left:10px}
-.thread .m{font-size:13px;margin-bottom:8px}
-.thread .m b{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.thread .m p{margin:2px 0 0;white-space:pre-wrap}
-.ticket-detail{background:var(--paper);border-top:1px solid var(--line)}
+tr.testrow td{background:#fbfdff;color:#849bae}
+.thread{border-left:2px solid var(--sky);margin:8px 0 12px;padding-left:11px}
+.thread .m{font-size:13px;margin-bottom:9px}
+.thread .m b{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#7c93a3}
+.thread .m p{margin:3px 0 0;white-space:pre-wrap}
+.ticket-detail{background:var(--paper);border-top:1px solid var(--hair)}
+
+/* ── phones: the column folds into a header strip ─────────────────────────── */
+@media(max-width:880px){
+  .shell{display:block}
+  .side{position:static;width:auto;flex:none;height:auto;padding:16px 18px 12px;display:block}
+  .mark{font-size:19px}
+  .mark small{font-size:8px;letter-spacing:2px;margin-top:3px}
+  .side-eyebrow{display:none}
+  .side-foot{display:none}
+  nav#index{display:flex;gap:6px;overflow-x:auto;margin-top:12px;padding-bottom:2px;scrollbar-width:none}
+  nav#index::-webkit-scrollbar{display:none}
+  nav#index a{white-space:nowrap;padding:7px 11px;font-size:12px;background:rgba(255,255,255,.08)}
+  nav#index a[aria-current="true"]{background:var(--wash)}
+  .topbar{padding:10px 16px;gap:8px}
+  .topbar .who{font-size:11px}
+  main{padding:18px 16px 46px}
+  .pagehead h1{font-size:25px;letter-spacing:-1.1px}
+  .triage{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .tile .n{font-size:26px}
+  .card{padding:15px 16px}
+  details.card>.body{padding-left:16px;padding-right:16px}
+  details.card>summary{padding:13px 16px;gap:9px}
+  details.card>summary h2{font-size:15px}
+  .secsum{display:none}
+  .rows .k{flex:0 0 120px}
+}
 </style>
 </head>
 <body>
-<header>
-  <div class="bar">
-    <h1>Resmara — Operator Console</h1>
-    <span class="badge">admin</span>
-    <span id="statusPill"></span>
-    <span class="sp"></span>
-    <span class="who" id="stamp"></span>
-    <span class="who" id="who"></span>
-    <button class="ghost hidden" id="logout" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.5)">Sign out</button>
-  </div>
-  <nav id="index" class="hidden">
-    <a href="#sec-support" data-go="support">Support</a>
-    <a href="#sec-content" data-go="content">Content</a>
-    <a href="#sec-campaigns" data-go="campaigns">Campaigns</a>
-    <a href="#sec-users" data-go="users">Accounts</a>
-    <a href="#sec-advertising" data-go="advertising">Connections</a>
-    <a href="#sec-activity" data-go="activity">Activity</a>
-    <a href="#sec-health" data-go="health">Health</a>
-    <a href="#sec-checks" data-go="checks">Checks</a>
-    <span class="grow"></span>
-    <a href="#" id="collapseAll">Collapse all</a>
-    <a href="#" id="reloadAll">Refresh</a>
-  </nav>
-</header>
+<div class="shell">
+  <aside class="side">
+    <a class="mark" href="admin.html">RESMARA<span>.</span><small>Buildroom</small></a>
+    <div class="side-eyebrow">Workspace</div>
+    <nav id="index" class="hidden">
+      <a href="#sec-support" data-go="support">Support</a>
+      <a href="#sec-content" data-go="content">Content</a>
+      <a href="#sec-campaigns" data-go="campaigns">Campaigns</a>
+      <a href="#sec-users" data-go="users">Accounts</a>
+      <a href="#sec-advertising" data-go="advertising">Connections</a>
+      <a href="#sec-activity" data-go="activity">Activity</a>
+      <a href="#sec-health" data-go="health">Health</a>
+      <a href="#sec-checks" data-go="checks">Checks</a>
+    </nav>
+    <div class="side-foot"><b>Operator console</b>Every figure is read from the database. Where one cannot be read, the section says why.</div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb"><span>Console</span><i>/</i><b id="crumbNow">Overview</b></div>
+      <span class="sp"></span>
+      <span id="statusPill"></span>
+      <span class="badge hidden" id="adminBadge">admin</span>
+      <span class="who" id="stamp"></span>
+      <span class="who" id="who"></span>
+      <span class="tools hidden" id="tools"><a href="#" id="collapseAll" class="tlink">Collapse all</a> <a href="#" id="reloadAll" class="tlink">Refresh</a></span>
+      <button class="ghost hidden" id="logout">Sign out</button>
+    </div>
 
 <main>
   <!-- ── login ─────────────────────────────────────────────────────────── -->
-  <section id="loginCard" class="card" style="max-width:420px;margin:40px auto">
+  <section id="loginCard" class="card" style="max-width:420px;margin:48px auto">
+    <div class="eyebrow">Operators only</div>
     <h2>Sign in</h2>
     <label for="email">Email</label>
     <input id="email" type="email" autocomplete="username" placeholder="you@example.com">
@@ -139,6 +240,11 @@ tr.testrow td{background:#fbfdff;color:#7c93a3}
 
   <!-- ── console ───────────────────────────────────────────────────────── -->
   <div id="console" class="hidden">
+    <div class="pagehead">
+      <div class="eyebrow">Project pulse</div>
+      <h1>Operator console</h1>
+      <p class="sub">Accounts, campaigns, the content pipeline and the money — each figure read from the database, with the reason stated wherever one could not be read.</p>
+    </div>
     <!-- What is actually waiting on a human, above the fold, before any list. -->
     <div class="triage" id="triage"></div>
 
@@ -230,6 +336,8 @@ tr.testrow td{background:#fbfdff;color:#7c93a3}
     </details>
   </div>
 </main>
+  </div>
+</div>
 
 <script>
 const TOKEN_KEY = 'resmara_admin_token';
@@ -465,8 +573,7 @@ async function loadMetrics(){
     // Every square used to go blank and only one of the four sections said why. Say it once,
     // in each section, and keep the console's own health row as the place to look next.
     const why = '<div class="msg bad">Could not read this section: ' + esc(err.message) +
-      ' — open “Health” below for the service side.' +
-      ' for the service side.</div>';
+      ' — open “Health” below for the service side.</div>';
     lastMetrics = null;
     $('triage').innerHTML = '<div class="hint" style="grid-column:1/-1">The work queue could not be counted: ' + esc(err.message) + '</div>';
     ['campaignsBody', 'contentBody', 'advertisingBody', 'activityBody'].forEach(id => { $(id).innerHTML = why; });
@@ -592,6 +699,12 @@ function setOpen(sec, open){
 function openSection(sec){
   const d = $('sec-' + sec); if (!d) return;
   d.open = true; setOpen(sec, true);
+  // The column on the left says which section you are looking at, and the bar says it in
+  // words, so a folded console never leaves somebody guessing where they landed.
+  document.querySelectorAll('#index a[data-go]').forEach(a =>
+    a.setAttribute('aria-current', String(a.dataset.go === sec)));
+  const title = d.querySelector('summary h2');
+  if (title && $('crumbNow')) $('crumbNow').textContent = title.textContent.trim();
   d.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 // Sections with real work in them open themselves the first time this browser sees the
@@ -632,6 +745,8 @@ async function boot(){
   $('console').classList.remove('hidden');
   $('index').classList.remove('hidden');
   $('logout').classList.remove('hidden');
+  $('adminBadge').classList.remove('hidden');
+  $('tools').classList.remove('hidden');
   $('who').textContent = me.email + (me.is_admin ? ' · admin' : ' · NOT admin');
   if (!me.is_admin) {
     // A logged-in non-admin used to see four empty sections and a 403 buried in one of them.
