@@ -55,7 +55,10 @@ function siteNav(active){
 }
 function signOutDemo(){state.clientSignedIn=false;persist();home();window.scrollTo(0,0)}
 function clientAccess(mode='signin'){
- if(state.clientSignedIn){dashboard();return}
+ // state.clientSignedIn is a browser memory, not a session. Ask the API client whether the
+ // token is still alive, or a customer whose session ended can never reach the form to fix it.
+ if(state.clientSignedIn&&window.RM&&RM.isLoggedIn()){dashboard();return}
+ if(state.clientSignedIn){state.clientSignedIn=false;persist()}
  const creating=mode==='create';
  show(`<span class="eyebrow">RESMARA CLIENT AREA</span><h2>${creating?'Create an account':'Client Login'}</h2><p>${creating?'Resmara is in private beta. Use the invite code you were sent, or an invited email address.':'Enter your email and password.'}</p><form onsubmit="event.preventDefault();submitTestClient(this,${creating})">${creating?'<label class="field">Full name<input name="clientName" required maxlength="120" autocomplete="name"></label>':''}<label class="field">Email address<input name="clientEmail" type="email" required maxlength="254" autocomplete="email"></label><label class="field">Password<input name="clientPassword" type="password" required minlength="6" autocomplete="current-password" value="test123"></label>${creating?'<label class="field">Invite code<input name="inviteCode" maxlength="64" autocomplete="off" spellcheck="false" placeholder="From your invitation"></label>':''}<p class="fine" role="status"></p><div class="modal-actions"><button>${creating?'Create account →':'Sign in →'}</button><button type="button" class="alt" onclick="clientAccess('${creating?'signin':'create'}')">${creating?'Back to sign in':'Create an account'}</button></div></form>${state.name&&!state.email?'<button class="alt" onclick="resumeDemo()">Resume previous demo →</button>':''}<p class="fine">Connected to Resmara backend API.</p>`);
 }
@@ -130,7 +133,7 @@ async function renderLiveMetaStep(){
  try{
   const rows=await RM.adAccounts();
   const list=Array.isArray(rows)?rows:(rows&&(rows.accounts||rows.items))||[];
-  if(!list.length){box.innerHTML='No Meta ad account is connected yet. <button class="alt" onclick="RM.metaConnect()">Connect a Meta account →</button>';return}
+  if(!list.length){box.innerHTML='No Meta account is connected yet — a campaign needs your Facebook Page and an ad account. <button class="alt" type="button" onclick="connectMeta()">Connect Meta →</button>';return}
   box.innerHTML=list.map(a=>esc([a.name||'Ad account',a.ad_account_id||a.external_id||'',a.simulated?'(demo)':''].filter(Boolean).join(' · '))).join('<br>');
  }catch(error){box.textContent='Could not read your connected accounts: '+error.message}
 }

@@ -75,8 +75,53 @@
     return true;
   }
 
+  /* A token that is past its own exp is not a session.
+   *
+   * Checking only "is there a string in localStorage?" meant a browser could sit for hours
+   * holding a dead token, still call itself signed in, and hand the customer the server's
+   * "Could not validate credentials" as though they had typed something wrong. Reading exp
+   * here turns that into an honest sign-in prompt the caller can act on.
+   */
+  function payload(t) {
+    try {
+      var part = String(t || '').split('.')[1];
+      if (!part) return null;
+      var b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) { b64 += '='; }
+      return JSON.parse(atob(b64));
+    } catch (e) { return null; }
+  }
+
+  function expired(t) {
+    var p = payload(t || token());
+    if (!p || !p.exp) return false;        // unreadable: let the server be the judge
+    return p.exp * 1000 <= Date.now();
+  }
+
+  // One listener, so the UI can say "your session ended" in its own words and in its own place.
+  var sessionLost = null;
+  function onSessionLost(fn) { sessionLost = typeof fn === 'function' ? fn : null; }
+
+  function endSession(notify) {
+    var had = !!token();
+    setToken(null);
+    if (had && notify !== false) { try { if (sessionLost) sessionLost(); } catch (e) { /* a UI hook must never eat the error */ } }
+    return true;
+  }
+
   function isLoggedIn() {
-    return !!token();
+    var t = token();
+    if (!t) return false;
+    // A token that has merely aged out is dropped quietly: the caller is about to say
+    // "sign in" in its own words, and a toast on every page load is noise.
+    if (expired(t)) { endSession(false); return false; }
+    return true;
+  }
+
+  // The expiry this browser holds, so a screen can say when the session ends without guessing.
+  function sessionExpiresAt() {
+    var p = payload(token());
+    return (p && p.exp) ? new Date(p.exp * 1000) : null;
   }
 
   // ---- low level ----------------------------------------------------------
@@ -124,11 +169,23 @@
 
   function request(path, opts) {
     opts = opts || {};
+    var sentSession = !!token();
     return fetch(BASE + path, {
       method: opts.method || 'GET',
       headers: authHeaders(opts.headers),
       body: opts.body,
-    }).then(parse);
+    }).then(parse).catch(function (err) {
+      // A 401 on the login call is "wrong password", not "your session ended" - the two
+      // must never be confused, because only one of them is the customer's to fix.
+      if (err && err.status === 401 && sentSession && path !== '/api/auth/login') {
+        // The server no longer accepts the token this browser holds. Drop it and say what
+        // actually happened, instead of passing "Could not validate credentials" on as if
+        // the customer had done something wrong.
+        endSession();
+        err.message = 'Your session ended — sign in again.';
+      }
+      throw err;
+    });
   }
 
   function json(path, method, payload) {
@@ -384,6 +441,8 @@
     setToken: setToken,
     logout: logout,
     isLoggedIn: isLoggedIn,
+    sessionExpiresAt: sessionExpiresAt,
+    onSessionLost: onSessionLost,
     login: login,
     register: register,
     me: me,

@@ -41,6 +41,8 @@ let nextResponse = { status: 200, json: {} };
 
 const sandbox = {
   console, JSON, Object, Array, Promise, Error, FormData, URLSearchParams, setTimeout, clearTimeout,
+  // api.js decodes the token payload to read its expiry; a browser has atob, the test needs one.
+  atob: (s) => Buffer.from(s, 'base64').toString('binary'),
   localStorage,
   fetch: async (url, opts) => {
     opts = opts || {};
@@ -309,6 +311,46 @@ async function one(name, run, expect) {
     eq('mounted health check stays inside the mount', seen.pop().url, '/resmara/');
     await M.apiVersion();
     eq('mounted version probe stays inside the mount', seen.pop().url, '/resmara/openapi.json');
+  }
+
+  // ---- a session that has ended is not a session ---------------------------
+  // The customer's report was "could not start the Meta connection": the browser held a
+  // 60-minute token, called itself signed in, and the server's "Could not validate
+  // credentials" reached them as if it were a Meta problem.
+  {
+    const jwt = (expSeconds) => 'h.' + Buffer.from(JSON.stringify({ sub: 'a@b.com', exp: expSeconds }))
+      .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') + '.s';
+
+    store.clear();
+    RM.setToken(jwt(Math.floor(Date.now() / 1000) - 60));
+    eq('a token past its exp is not a session', RM.isLoggedIn(), false);
+    eq('...and is dropped, not left to 401 later', RM.token(), null);
+
+    store.clear();
+    RM.setToken(jwt(Math.floor(Date.now() / 1000) + 3600));
+    eq('a token inside its exp is a session', RM.isLoggedIn(), true);
+    const endsAt = RM.sessionExpiresAt();
+    ok('the browser can read when it ends', !!endsAt && typeof endsAt.getTime === 'function',
+       String(endsAt));
+
+    // The server refusing the token mid-work: drop it, say why, and tell the UI once.
+    let lost = 0;
+    RM.onSessionLost(() => { lost++; });
+    store.clear();
+    RM.setToken(jwt(Math.floor(Date.now() / 1000) + 3600));
+    nextResponse = { status: 401, json: { detail: 'Could not validate credentials' } };
+    let message = '';
+    try { await RM.adAccounts(); } catch (e) { message = e.message; }
+    eq('a 401 is reported as an ended session, not a credential problem', message, 'Your session ended — sign in again.');
+    eq('a 401 clears the dead token', RM.token(), null);
+    eq('a 401 tells the UI once', lost, 1);
+
+    // A wrong password is the customer's to fix; it must never be called an ended session.
+    store.clear();
+    RM.setToken(jwt(Math.floor(Date.now() / 1000) + 3600));
+    let loginMessage = '';
+    try { await RM.login('a@b.com', 'wrong'); } catch (e) { loginMessage = e.message; }
+    ok('a failed login keeps the server\'s reason', loginMessage !== 'Your session ended — sign in again.', loginMessage);
   }
 
   console.log('\n' + checks + ' checks, ' + failures + ' failed.');

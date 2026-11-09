@@ -11,7 +11,11 @@ load_dotenv()
 class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "resmara-dev-secret-key-change-in-prod")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # How long a sign-in lasts. One hour was shorter than a campaign takes to build, so a
+    # customer was signed out mid-setup and the next request came back "Could not validate
+    # credentials" - which reads as a Meta failure. Seven days covers a 14-day campaign
+    # being set up across a couple of sittings; override with ACCESS_TOKEN_EXPIRE_MINUTES.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./resmara.db")
     ENV: str = os.getenv("RESMARA_ENV", "development")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")

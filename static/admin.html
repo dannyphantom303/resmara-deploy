@@ -413,7 +413,16 @@ async function api(path, opts = {}) {
   let body; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
   if (!res.ok) {
     const err = new Error((body && body.detail) ? JSON.stringify(body.detail) : ('HTTP ' + res.status));
-    err.status = res.status; throw err;
+    err.status = res.status;
+    // A token the server has stopped accepting is not a console that works: drop it and put
+    // the sign-in back on screen, saying why, instead of leaving four panels of errors.
+    if (res.status === 401 && t) {
+      localStorage.removeItem(TOKEN_KEY);
+      const card = $('loginCard'), m = $('loginMsg');
+      if (card) card.classList.remove('hidden');
+      if (m) { m.className = 'msg'; m.textContent = 'Your session ended — sign in again.'; }
+    }
+    throw err;
   }
   return body;
 }
@@ -838,7 +847,13 @@ document.querySelectorAll('.filters .chip').forEach(chip => chip.addEventListene
 async function boot(){
   let me;
   try { me = await api('/api/auth/me'); }
-  catch { localStorage.removeItem(TOKEN_KEY); return; }
+  catch (err) {
+    localStorage.removeItem(TOKEN_KEY);
+    // Say why the console went back to the sign-in, instead of looking like it forgot you.
+    const m = $('loginMsg');
+    if (m) { m.className = 'msg'; m.textContent = (err && err.status === 401 ? 'Your session ended — sign in again.' : 'Could not reach the server — sign in again.'); }
+    return;
+  }
   $('loginCard').classList.add('hidden');
   $('console').classList.remove('hidden');
   $('index').classList.remove('hidden');
