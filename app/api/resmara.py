@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.db.session import get_db, User, AdAccount, Creative, Boost, Post, Ad, SupportTicket, Event
+from app.db.session import get_db, User, AdAccount, Creative, Boost, Post, Ad, SupportTicket, Event, Asset
 from app.core.testdata import is_test_email
 from app.core.security import get_current_user, get_admin_user
 from app.schemas.resmara import (
@@ -154,10 +154,16 @@ def list_boosts(current_user=Depends(get_current_user), db: Session = Depends(ge
         published = dict(db.query(Post.boost_id, func.count(Post.id)).filter(
             Post.boost_id.in_(ids), Post.publish_status == "published").group_by(Post.boost_id).all())
         counted = {bid: (total.get(bid, 0), approved.get(bid, 0), published.get(bid, 0)) for bid in ids}
+    covers = {}
+    if ids:
+        for asset in (db.query(Asset).filter(Asset.boost_id.in_(ids))
+                      .order_by(Asset.boost_id, Asset.id).all()):
+            covers.setdefault(asset.boost_id, asset.url)
     rows = []
     for b in boosts:
         row = BoostOut.model_validate(b)
         row.posts_total, row.posts_approved, row.posts_published = counted.get(b.id, (0, 0, 0))
+        row.image = covers.get(b.id)
         rows.append(row)
     return rows
 

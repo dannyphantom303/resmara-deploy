@@ -111,6 +111,9 @@ class BoostOut(BaseModel):
     posts_total: int = 0
     posts_approved: int = 0
     posts_published: int = 0
+    # The campaign's own first gallery photo, so a card shows the property instead of stock
+    # art. Empty means no photo imported yet - the UI has to say that, not fake one.
+    image: Optional[str] = None
     class Config:
         from_attributes = True
 

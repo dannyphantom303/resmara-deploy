@@ -89,7 +89,7 @@ function pricing() {
       <h1>${billingMoney(BILLING_PRICE_CENTS)} for<br><span>one campaign.</span></h1>
       <p>Fourteen days of branded posts for Facebook and Instagram, digital ad creative, and
       Day 7 and Day 14 seller reports — for one property.</p>
-      <p>No subscription, no credit packs, nothing that expires. You pay when you build the
+      <p>No subscription, and nothing that expires. You pay when you build the
       campaign. Meta ad spend is paid separately, straight to Meta.</p>
       <button class="campaign-primary" onclick="newCampaign()">Start a campaign · ${billingMoney(BILLING_PRICE_CENTS)}</button>
     </div>${creditCalculator(true)}</section>

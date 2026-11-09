@@ -19,7 +19,7 @@ async function syncLiveCampaigns(){
   const before=state.campaigns.map(c=>String(campaignBoostId(c))).join(',');
   list.forEach(b=>{
    if(!b||b.id==null)return;
-   const card={address:b.address,area:(b.campaign_days||14)+'-day campaign · $'+Number(b.ad_budget_usd||0).toFixed(0)+'/day',status:liveStatusLabel(b),boostId:b.id,live:true,day:0,posts_total:b.posts_total||0,posts_approved:b.posts_approved||0,posts_published:b.posts_published||0,url:'',media:'',budget:'$'+Number(b.ad_budget_usd||0).toFixed(0)+'/day'};
+   const card={address:b.address,area:(b.campaign_days||14)+'-day campaign · $'+Number(b.ad_budget_usd||0).toFixed(0)+'/day',status:liveStatusLabel(b),boostId:b.id,live:true,day:0,posts_total:b.posts_total||0,posts_approved:b.posts_approved||0,posts_published:b.posts_published||0,url:'',media:'',image:b.image||undefined,budget:'$'+Number(b.ad_budget_usd||0).toFixed(0)+'/day'};
    const existing=state.campaigns.find(c=>String(campaignBoostId(c))===String(b.id));
    if(existing)Object.assign(existing,card);else state.campaigns.push(card);
   });
