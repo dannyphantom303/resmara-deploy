@@ -348,6 +348,11 @@
     return request('/api/billing/config');
   }
 
+  function savedCards() {
+    // The cards Stripe already holds for this account, masked. Read-only.
+    return request('/api/billing/cards');
+  }
+
   function checkout(boostId) {
     return json('/api/billing/checkout', 'POST', { boost_id: boostId });
   }
@@ -485,6 +490,7 @@
     approveAll: approveAll,
     generateContent: generateContent,
     billingConfig: billingConfig,
+    savedCards: savedCards,
     checkout: checkout,
     orders: orders,
     boostBilling: boostBilling,

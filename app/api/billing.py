@@ -93,10 +93,33 @@ async def create_checkout(body: CheckoutRequest, current_user: User = Depends(ge
         return {"status": "pending", "boost_id": boost.id, "url": existing.checkout_url,
                 "session_id": existing.stripe_session_id, "price_cents": existing.amount_cents}
 
+    # One Customer per account. This is what makes the saved card appear at Checkout next time
+    # instead of an empty card form; the id is ours to remember, the card stays at Stripe.
+    customer_id = current_user.stripe_customer_id
+    if not customer_id:
+        try:
+            customer_id = await billing.ensure_customer(
+                user_id=current_user.id, email=current_user.email,
+                name=current_user.name or "")
+        except httpx.HTTPStatusError as e:
+            detail = "Stripe refused to create the customer"
+            try:
+                detail = (e.response.json().get("error") or {}).get("message") or detail
+            except Exception:  # noqa: BLE001
+                pass
+            raise HTTPException(status_code=502, detail=detail)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        current_user.stripe_customer_id = customer_id
+        db.add(Event(user_id=current_user.id, boost_id=boost.id,
+                     event_type="stripe_customer_created",
+                     payload={"customer_id": customer_id}))
+        db.commit()
+
     try:
         session = await billing.create_checkout_session(
             boost_id=boost.id, user_id=current_user.id, address=boost.address,
-            base_url=settings.PUBLIC_BASE_URL)
+            base_url=settings.PUBLIC_BASE_URL, customer_id=customer_id, save_card=True)
     except httpx.HTTPStatusError as e:
         detail = "Stripe refused the checkout"
         try:
@@ -157,6 +180,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             order.status = "paid"
             order.paid_at = datetime.utcnow()
             order.stripe_payment_intent = outcome.get("payment_intent") or order.stripe_payment_intent
+        # Belt and braces: if the checkout that paid was created before the account had a
+        # customer id, remember the one Stripe actually charged so the next purchase prefills.
+        payer = db.query(User).filter(User.id == (order.user_id if order else outcome.get("user_id"))).first()
+        if payer is not None and outcome.get("customer") and not payer.stripe_customer_id:
+            payer.stripe_customer_id = outcome.get("customer")
         if boost:
             boost.paid_at = datetime.utcnow()
             boost.paid_amount_cents = outcome.get("amount_cents") or billing.price_cents()
@@ -169,6 +197,27 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     db.commit()
     return {"received": True, "status": order.status if order else "unmatched"}
+
+
+@router.get("/billing/cards")
+async def my_cards(current_user: User = Depends(get_current_user)):
+    """The cards Stripe already has for this account, masked. Drives the 'saved card' note."""
+    if not billing.billing_enabled():
+        return {"enabled": False, "cards": [], "note": "Billing is not configured yet."}
+    customer_id = current_user.stripe_customer_id
+    if not customer_id:
+        return {"enabled": True, "cards": [], "note": "No card saved yet."}
+    try:
+        cards = await billing.list_cards(customer_id)
+    except Exception as exc:  # noqa: BLE001 - a Stripe outage must not break the billing page
+        return {"enabled": True, "cards": [], "note": "Could not read saved cards (%s)." %
+                type(exc).__name__}
+    return {
+        "enabled": True,
+        "cards": cards,
+        "note": ("Your card is saved - checkout will offer it." if cards
+                 else "No card saved yet."),
+    }
 
 
 @router.get("/billing/orders")

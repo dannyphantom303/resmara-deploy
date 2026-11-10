@@ -30,6 +30,9 @@ class User(Base):
     # Until this column existed the profile lived only in one browser's localStorage, so
     # clearing storage or signing in on another machine lost work the customer had done.
     brand = Column(JSON, default=dict)
+    # The Stripe Customer this account pays as. Created on the first checkout and reused after
+    # that, so Checkout can show the saved card instead of asking for it again.
+    stripe_customer_id = Column(String, nullable=True)
 
 # --- Ad Account (OAuth) ---
 class AdAccount(Base):

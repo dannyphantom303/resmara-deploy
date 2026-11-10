@@ -62,7 +62,8 @@ function showPaywall(boostId, detail) {
   show(`<span class="eyebrow">CAMPAIGN CHECKOUT</span>
     <h2>This campaign is ${esc(price)}</h2>
     <p>${esc((detail && detail.message) || 'Buy the campaign to build its 14 days of posts.')}</p>
-    <p class="fine">Card details go to Stripe — Resmara never stores them. Meta ad spend is separate.</p>
+    <p class="fine">Card details go to Stripe — Resmara never stores them. Stripe will offer the card
+    you used last time, so this is the last time you type it. Meta ad spend is separate.</p>
     <div class="modal-actions">
       <button class="alt" onclick="modal.close()">Not now</button>
       <button class="campaign-primary" onclick="startCampaignCheckout(${Number(boostId)})">Pay ${esc(price)} and build →</button>
@@ -105,10 +106,29 @@ async function myCredits() {
       No subscription and nothing to top up.</p></div>
     <section class="panel"><h2>Purchases</h2>
       <div id="billing-orders"><p class="fine">Loading your purchases…</p></div></section>
+    <section class="panel"><h2>Payment method</h2>
+      <div id="billing-cards"><p class="fine">Checking your saved card…</p></div></section>
     <section class="panel"><h2>How it works</h2>
       <p>You pay ${billingMoney(BILLING_PRICE_CENTS)} when you build a campaign. Card details go to
       Stripe; Resmara never stores them. Meta ad spend is separate and paid to Meta from your own
       ad account.</p></section>`;
+
+  // Saved card: Stripe keeps it on your customer record, so the next campaign is one click.
+  var cardBox = document.getElementById('billing-cards');
+  if (cardBox && RM.savedCards) {
+    RM.savedCards().then(function (res) {
+      var cards = (res && res.cards) || [];
+      cardBox.innerHTML = cards.length
+        ? '<ul class="campaign-report-list">' + cards.map(function (c) {
+            return '<li><strong>' + esc(c.label) + '</strong><span class="fine">Stored by Stripe — ' +
+              'checkout will offer it, no number to retype.</span></li>';
+          }).join('') + '</ul><p class="fine">Your card number never reaches Resmara.</p>'
+        : '<p class="fine">' + esc((res && res.note) || 'No card saved yet.') +
+          ' Your first campaign saves it for next time.</p>';
+    }).catch(function () {
+      cardBox.innerHTML = '<p class="fine">Could not read your saved card right now.</p>';
+    });
+  }
 
   var box = document.getElementById('billing-orders');
   if (!box) return;

@@ -12,6 +12,7 @@ ADDITIONS = {
     # A brand profile the customer entered has to outlive the browser it was typed in.
     "users": [
         ("brand", "JSON"),
+        ("stripe_customer_id", "VARCHAR"),
     ],
     "ad_accounts": [
         ("refresh_token", "TEXT"),
