@@ -64,26 +64,37 @@ async def _run_build(boost_id: int, user_id: int, force: bool, openings: Optiona
         if not boost or not user:
             state.update({"status": "error", "error": "boost or user disappeared mid-build"})
             return
+        from app.services import llm
         result = await run_engine(boost, db, force=force, openings=openings)
+        spent = llm.take_usage()
         state.update({
             "status": "done",
             "posts_created": result.get("posts_created") or 0,
             "source": result.get("source"),
             "violations": len(result.get("violations") or []),
             "notes": (result.get("notes") or [])[:6],
+            # What this one campaign cost, as the provider counted it.
+            "tokens": spent,
         })
         _log(db, user, boost_id, "campaign_built", {
             "source": result.get("source"), "posts": result.get("posts_created"),
             "violations": len(result.get("violations") or []),
+            "tokens": spent.get("total_tokens"), "calls": spent.get("calls"),
         })
         db.commit()
     except Exception as e:  # noqa: BLE001 - the build may fail for a dozen reasons; record it
         db.rollback()
         state.update({"status": "error", "error": str(e)[:400]})
         try:
+            from app.services import llm
+            spent = llm.take_usage()  # a failed run still burned tokens; say how many
+            state["tokens"] = spent
             user = db.query(User).filter(User.id == user_id).first()
             if user:
-                _log(db, user, boost_id, "error", {"where": "build_campaign", "error": str(e)[:400]})
+                _log(db, user, boost_id, "error", {
+                    "where": "build_campaign", "error": str(e)[:400],
+                    "tokens": spent.get("total_tokens"), "calls": spent.get("calls"),
+                })
                 db.commit()
         except Exception:
             db.rollback()

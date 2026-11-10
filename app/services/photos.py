@@ -28,7 +28,9 @@ CONTENT_TYPE_EXT = {
     "image/webp": ".webp",
 }
 MAX_BYTES = 12 * 1024 * 1024
-DEFAULT_LIMIT = 10
+# A 14-day campaign wants a different photo most days, and the importer used to stop at ten,
+# silently discarding the rest of the gallery. Twenty leaves room for a longer run.
+DEFAULT_LIMIT = 20
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

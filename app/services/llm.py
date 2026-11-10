@@ -52,6 +52,36 @@ class LLMError(Exception):
     """Any OpenAI-compatible call failure (transport, HTTP status, unparseable body)."""
 
 
+# What each call cost, as the provider reported it. A campaign is priced in tokens, so the
+# number has to come from the response's own `usage` block - never from an estimate made up
+# afterwards. `take_usage()` empties the list, so one campaign's build reports its own total.
+USAGE: list = []
+
+
+def take_usage() -> dict:
+    """Total tokens of the calls made since the last take, and a per-call breakdown."""
+    calls = list(USAGE)
+    USAGE.clear()
+    return {
+        "calls": calls,
+        "prompt_tokens": sum(int((c.get("prompt_tokens") or 0)) for c in calls),
+        "completion_tokens": sum(int((c.get("completion_tokens") or 0)) for c in calls),
+        "total_tokens": sum(int((c.get("total_tokens") or 0)) for c in calls),
+    }
+
+
+def _record_usage(data: dict, model: str) -> None:
+    usage = (data or {}).get("usage")
+    if not isinstance(usage, dict):
+        return
+    USAGE.append({
+        "model": model,
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+    })
+
+
 # ---------------------------------------------------------------------------
 # Availability + base URL
 # ---------------------------------------------------------------------------
@@ -209,9 +239,13 @@ async def _post(path: str, payload: dict, *, timeout: float | None = None) -> di
                 if relaxed != sent:
                     retry = await client.post(url, json=relaxed, headers=headers)
                     if retry.status_code < 400:
-                        return retry.json()
+                        data = retry.json()
+                        _record_usage(data, str(sent.get("model", "")))
+                        return data
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            _record_usage(data, str(sent.get("model", "")))
+            return data
     except httpx.HTTPStatusError as exc:  # pragma: no cover - network path
         body = exc.response.text[:500] if exc.response is not None else ""
         raise LLMError(f"HTTP {exc.response.status_code} from {url}: {body}") from exc
@@ -249,10 +283,9 @@ async def chat_json(
         payload["reasoning_effort"] = reasoning_effort
 
     data = await _post("/chat/completions", payload)
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"chat_json: unexpected response shape: {str(data)[:300]}") from exc
+    content = _reply_text(data)
+    if content is None:
+        raise LLMError(f"chat_json: unexpected response shape: {str(data)[:300]}")
     parsed = _json_object(content)
     if parsed is None:
         # A small free model sometimes answers with prose first, or stops mid-object when it hits
@@ -271,17 +304,53 @@ async def chat_json(
         ]
         try:
             data = await _post("/chat/completions", retry)
-            second = data["choices"][0]["message"]["content"]
+            second = _reply_text(data) or ""
         except (LLMError, KeyError, IndexError, TypeError):
             second = ""
         parsed = _json_object(second)
         if parsed is None:
-            seen = (second or str(content) or "").strip().replace("\n", " ")[:180]
+            # Last resort: some gateways answer "" to a forced json_object request but are fine
+            # without it. One plain call, then the JSON is lifted out of the prose.
+            plain = {k: v for k, v in payload.items() if k != "response_format"}
+            plain["temperature"] = 0
+            try:
+                data = await _post("/chat/completions", plain)
+                third = _reply_text(data) or ""
+            except LLMError:
+                third = ""
+            parsed = _json_object(third)
+            if parsed is not None:
+                return parsed
+            seen = (third or second or str(content) or "").strip().replace("\n", " ")[:180]
+            finish = ((data or {}).get("choices") or [{}])[0].get("finish_reason")
             raise LLMError(
                 f"chat_json: the model did not return valid JSON after a retry (model={model})."
-                f" It answered: {seen!r}"
+                f" finish_reason={finish!r}. It answered: {seen!r}"
             )
     return parsed
+
+
+def _reply_text(data: dict) -> str | None:
+    """The model's text, wherever this provider put it.
+
+    A reasoning model on an OpenAI-compatible endpoint can return message.content = "" and put
+    the whole answer in `reasoning_content` / `reasoning` / `thinking`. Reading only `content`
+    made a perfectly good answer look like a timeout, and the campaign failed with
+    "It answered: ''" while the plan sat in the reasoning field.
+    """
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if isinstance(message.get("content"), str) and message["content"].strip():
+        return message["content"]
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    if isinstance(message.get("content"), str):
+        return message["content"]
+    return None
 
 
 def _json_object(text) -> dict | None:
@@ -321,11 +390,10 @@ async def _chat_completion_text(prompt: str, *, model: str, timeout: float = 240
     """One-shot chat/completions call returning the text (no web search, no tools)."""
     payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
     data = await _post("/chat/completions", payload, timeout=timeout)
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"chat: unexpected response shape: {str(data)[:300]}") from exc
-    if not isinstance(content, str) or not content.strip():
+    content = _reply_text(data)
+    if content is None:
+        raise LLMError(f"chat: unexpected response shape: {str(data)[:300]}")
+    if not content.strip():
         raise LLMError("chat: model returned an empty reply")
     return content
 
@@ -414,10 +482,12 @@ async def chat_text(
         payload["reasoning_effort"] = reasoning_effort
 
     data = await _post("/chat/completions", payload)
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"chat_text: unexpected response shape: {str(data)[:300]}") from exc
+    content = _reply_text(data)
+    if content is None:
+        raise LLMError(f"chat_text: unexpected response shape: {str(data)[:300]}")
+    if not content.strip():
+        raise LLMError("chat_text: model returned an empty reply")
+    return content
 
 
 # ===========================================================================
