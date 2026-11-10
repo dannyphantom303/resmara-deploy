@@ -51,7 +51,9 @@ AGENT_CARD_KEYS = (
 
 # A listing gallery is 8-20 photos; tagging more than this spends vision calls for photos
 # the plan will not reach anyway.
-MAX_TAG_PHOTOS = 12
+# The vision tagger ran one call per photo and stopped at twelve, so a 14-photo gallery left
+# two photos with no room, no tags and no way for the plan to choose them.
+MAX_TAG_PHOTOS = 20
 
 # The doc-14 ROOM values (used only for a sanity check on offline tagging).
 _DOC_ROOMS = {
