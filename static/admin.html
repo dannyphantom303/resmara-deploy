@@ -219,6 +219,7 @@ tr.testrow td{background:#fbfdff;color:#849bae}
     <a class="mark" href="admin.html">RESMARA<span>.</span><small>Buildroom</small></a>
     <div class="side-eyebrow">Workspace</div>
     <nav id="index" class="hidden">
+      <a href="#sec-buildroom" data-go="buildroom">Build room</a>
       <a href="#sec-support" data-go="support">Support</a>
       <a href="#sec-content" data-go="content">Content</a>
       <a href="#sec-campaigns" data-go="campaigns">Campaigns</a>
@@ -267,6 +268,18 @@ tr.testrow td{background:#fbfdff;color:#849bae}
     </div>
     <!-- What is actually waiting on a human, above the fold, before any list. -->
     <div class="triage" id="triage"></div>
+
+    <details class="card sec" data-sec="buildroom" id="sec-buildroom">
+      <summary><h2>Build room</h2><span class="secsum">the design bench — one click, no second bookmark</span><span class="chev">›</span></summary>
+      <div class="body">
+        <p class="hint" style="margin-top:0">Campaign concepts, listings and creatives are worked out in the build room.
+          It runs on its own host and refuses to be framed (<code>X-Frame-Options: SAMEORIGIN</code>), so the button
+          opens it in a tab rather than inside this page.</p>
+        <p style="margin:12px 0 0"><a id="openBuildroom" href="https://resmara-buildroom.adambapdigital.chatgpt.site/"
+           target="_blank" rel="noopener"
+           style="display:inline-block;padding:10px 16px;border-radius:10px;background:var(--blue);color:#fff;text-decoration:none;font-weight:600">Open the build room ↗</a></p>
+      </div>
+    </details>
 
     <details class="card sec" data-sec="support" id="sec-support">
       <summary><h2>Support</h2><span class="secsum" id="sum-support">…</span><span class="chev">›</span></summary>
@@ -822,7 +835,9 @@ function openFromWork(m){
   const p = pending(m), saved = savedOpen();
   document.querySelectorAll('details.sec').forEach(d => {
     const sec = d.dataset.sec;
-    d.open = sec in saved ? !!saved[sec] : !!((p[sec] || {}).n);
+    // The build room has no count of its own, so it would never open by itself; it is the first
+    // thing an operator usually wants, so it starts unfolded until they fold it.
+    d.open = sec in saved ? !!saved[sec] : (sec === 'buildroom' ? true : !!((p[sec] || {}).n));
   });
 }
 
