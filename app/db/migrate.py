@@ -50,6 +50,10 @@ ADDITIONS = {
     "boosts": [
         ("paid_at", "TIMESTAMP"),
         ("paid_amount_cents", "INTEGER"),
+        # Hiding a campaign from the list is reversible and keeps its history; only the flag
+        # changes. A duplicate "boosts" key here would have silently dropped this entry, so
+        # every boost column belongs in this one block.
+        ("hidden", "BOOLEAN DEFAULT FALSE"),
     ],
     "orders": [
         ("user_id", "INTEGER"),

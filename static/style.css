@@ -208,3 +208,14 @@ input,select{border-radius:999px}
 
 .page-context{font-size:13px;font-weight:700;color:#52778f;letter-spacing:.02em}
 @media(max-width:849px){.page-context{font-size:10px}.journey .launch-nav{flex-wrap:wrap}.journey .launch-nav .page-context{order:3;width:100%;padding-left:42px;margin-top:-10px}}
+/* Hiding and deleting a campaign. The card keeps one primary action and puts the two
+   destructive-adjacent choices underneath it as plain text buttons, so neither is a surprise. */
+.card-manage{display:flex;gap:16px;justify-content:flex-end;margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.card .card-manage .linkbtn{width:auto;margin:0;padding:2px 0;background:none;border:0;color:var(--muted);font-size:12px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.card .card-manage .linkbtn:hover{filter:none;color:var(--ink)}
+.card .card-manage .linkbtn.danger:hover{color:#a4331f}
+.hidden-campaigns{margin-top:26px}
+.hidden-campaigns summary{cursor:pointer;font-size:13px}
+.hidden-list{display:grid;gap:8px;margin-top:14px}
+.hidden-list .flex{padding:8px 0;border-top:1px solid var(--line)}
+.hidden-list button{padding:7px 12px;font-size:12px}

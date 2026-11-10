@@ -174,6 +174,59 @@ def get_boost(boost_id: int, current_user=Depends(get_current_user), db: Session
         raise HTTPException(status_code=404, detail="Boost not found")
     return b
 
+
+@router.post("/boosts/{boost_id}/hide", response_model=BoostOut)
+def hide_boost(boost_id: int, hidden: bool = True,
+               current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Take a campaign out of the list, or put it back. The campaign is not touched.
+
+    Hiding is a flag on the row rather than a delete because a finished campaign still has a
+    report worth opening; hiding it must not cost the customer their history.
+    """
+    b = db.query(Boost).filter(Boost.id == boost_id, Boost.user_id == current_user.id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Boost not found")
+    b.hidden = bool(hidden)
+    db.commit()
+    db.refresh(b)
+    return b
+
+
+@router.delete("/boosts/{boost_id}")
+def delete_boost(boost_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """Delete a campaign this client owns, along with the content built for it.
+
+    A paid campaign is refused: the order is the record that money changed hands, and deleting
+    the campaign would take it with it. Anything already published to Meta stays there - this
+    removes Resmara's copy, not the ad in Ads Manager, and the response says so.
+    """
+    from app.db.session import Order
+    b = db.query(Boost).filter(Boost.id == boost_id, Boost.user_id == current_user.id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Boost not found")
+    if db.query(Order).filter(Order.boost_id == boost_id).first():
+        raise HTTPException(
+            status_code=409,
+            detail="This campaign was paid for, so it can't be deleted here — the payment record "
+                   "lives with it. Hide it instead, or contact support to cancel the order.",
+        )
+    removed = {
+        "posts": db.query(Post).filter(Post.boost_id == boost_id).delete(synchronize_session=False),
+        "ads": db.query(Ad).filter(Ad.boost_id == boost_id).delete(synchronize_session=False),
+        "assets": db.query(Asset).filter(Asset.boost_id == boost_id).delete(synchronize_session=False),
+        "events": db.query(Event).filter(Event.boost_id == boost_id).delete(synchronize_session=False),
+    }
+    live_meta = bool(b.meta_campaign_id)
+    db.delete(b)
+    db.commit()
+    return {
+        "deleted": boost_id,
+        "removed": removed,
+        "note": ("Nothing was published to Meta from this campaign." if not live_meta else
+                 "Resmara's copy is gone. Anything already live on Facebook or Instagram "
+                 "stays in Meta Ads Manager — pause it there if you need to."),
+    }
+
 # --- Launch Campaign ---
 @router.post("/launch")
 async def launch_campaign(payload: LaunchPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):

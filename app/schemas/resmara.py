@@ -103,6 +103,7 @@ class BoostOut(BaseModel):
     campaign_days: int = 14
     ad_budget_usd: float = 50.0
     stage: str = "PENDING"
+    hidden: bool = False
     meta_campaign_id: Optional[str] = None
     created_at: Optional[datetime] = None
     launched_at: Optional[datetime] = None

@@ -122,6 +122,9 @@ class Boost(Base):
     ad_brief = Column(JSON, default={})
     meta_campaign_id = Column(String, nullable=True)
     stage = Column(String, default="PENDING")  # PENDING, LIVE, COMPLETE
+    # Hidden from the campaign list without destroying it: a finished campaign still has a
+    # report worth reading, so "hide" is a flag on the row, not a delete.
+    hidden = Column(Boolean, default=False)
     # A campaign is bought, not credited: $49 at checkout sets these, and the build/launch
     # gates read them. Both null = nobody has paid for this campaign yet.
     paid_at = Column(DateTime(timezone=True), nullable=True)

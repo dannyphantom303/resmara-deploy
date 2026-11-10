@@ -21,6 +21,12 @@ from app.main import app  # noqa: E402
 from app.db.session import SessionLocal, User, Boost, Order  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
 from app.services import billing  # noqa: E402
+# The suite shares this repo's dev database. Startup migrates it in the running app; this test
+# builds its own TestClient, which never fires startup, so it migrates here or a column added to
+# a model this test inserts (boosts.hidden) is missing.
+from app.db.migrate import migrate  # noqa: E402
+
+migrate()
 
 PASSED = 0
 FAILED = 0

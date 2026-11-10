@@ -237,6 +237,17 @@
     return request('/api/boosts/' + segment(id));
   }
 
+  // Hiding and deleting are the two ways a customer clears their list. Hiding is reversible and
+  // keeps the campaign and its report; deleting removes Resmara's copy of the campaign.
+  function hideBoost(id, hidden) {
+    return request('/api/boosts/' + segment(id) + '/hide?hidden=' + (hidden === false ? 'false' : 'true'),
+      { method: 'POST' });
+  }
+
+  function deleteBoost(id) {
+    return request('/api/boosts/' + segment(id), { method: 'DELETE' });
+  }
+
   function createBoost(data) {
     data = data || {};
     return json('/api/boosts', 'POST', {
@@ -461,6 +472,8 @@
     me: me,
     boosts: boosts,
     boost: boost,
+    hideBoost: hideBoost,
+    deleteBoost: deleteBoost,
     createBoost: createBoost,
     uploadPhoto: uploadPhoto,
     assets: assets,
