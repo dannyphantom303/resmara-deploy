@@ -86,9 +86,14 @@ async def _run_build(boost_id: int, user_id: int, force: bool, openings: Optiona
         db.rollback()
         state.update({"status": "error", "error": str(e)[:400]})
         try:
-            from app.services import llm
-            spent = llm.take_usage()  # a failed run still burned tokens; say how many
+            from app.services.llm import take_usage
+            spent = take_usage()  # a failed run still burned tokens; say how many
             state["tokens"] = spent
+            # A campaign that failed while still marked "In Progress" is the worst of both:
+            # the customer waits for content that will never arrive. Say it failed.
+            boost = db.query(Boost).filter(Boost.id == boost_id).first()
+            if boost and (state.get("posts_created") or 0) == 0:
+                boost.main_status = "Build failed"
             user = db.query(User).filter(User.id == user_id).first()
             if user:
                 _log(db, user, boost_id, "error", {
