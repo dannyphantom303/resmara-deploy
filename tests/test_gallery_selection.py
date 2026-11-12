@@ -263,5 +263,30 @@ def main() -> int:
     return 0
 
 
+# ── a portal URL carries the address the Trulia fallback needs ────────────────────────────
+# Zillow and Redfin answer a datacenter IP with a bot wall, so the only route that still
+# serves the gallery is the same property on Trulia, found by address. The address has to
+# come from somewhere, and every portal spells it out in the URL path.
+
+from app.services.photos import address_from_url
+
+PORTAL_URLS = [
+    ("https://www.zillow.com/homedetails/4422-Clay-St-Redding-CA-96003/15238205_zpid/",
+     "4422 Clay St, Redding, CA 96003"),
+    ("https://www.redfin.com/CA/Redding/1354-Harpole-Rd-96002/home/139453215",
+     "1354 Harpole Rd, Redding, CA 96002"),
+    ("https://www.realtor.com/realestateandhomes-detail/6495-Mojave-Ct_Anderson_CA_96007_M12345-67890",
+     "6495 Mojave Ct, Anderson, CA 96007"),
+]
+for url, want in PORTAL_URLS:
+    got = address_from_url(url)
+    assert got == want, f"{url}\n   want {want!r}\n   got  {got!r}"
+print(f"ok   {len(PORTAL_URLS)} portal URLs give up their address")
+# A URL with no address in it must not invent one, or the Trulia fallback searches for a
+# street that does not exist and the import looks like a wall rather than an empty field.
+assert address_from_url("https://www.trulia.com/CA/Anderson/") == ""
+assert address_from_url("https://example.com/") == ""
+print("ok   a URL with no address returns nothing")
+
 if __name__ == "__main__":
     sys.exit(main())

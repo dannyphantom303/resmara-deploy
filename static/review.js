@@ -54,11 +54,16 @@ async function uploadCampaignPhotos(input){
  const files=[...(input.files||[])];if(!files.length)return;
  const status=document.querySelector('[data-photo-status]');
  if(status)status.textContent='Uploading '+files.length+' photo'+(files.length===1?'':'s')+'…';
- let ok=0;
- for(const file of files){try{await RM.uploadPhoto(file,boostId,'photo');ok++}catch(e){}}
+ let ok=0,failed=[];
+ // A photo that fails to upload must be named, not counted. An owner who drops 61 files and
+ // reads "Uploaded 56" has no way to know which five to send again.
+ for(const file of files){
+  try{await RM.uploadPhoto(file,boostId,'photo');ok++}
+  catch(e){failed.push(file.name+(e&&e.message?' ('+e.message+')':''))}
+ }
  if(status)status.textContent=ok
-  ?'Uploaded '+ok+'. Rebuild the campaign to put them in the calendar.'
-  :'Upload failed — use a JPEG, PNG or WebP under 500 KB.';
+  ?('Uploaded '+ok+(failed.length?' — '+failed.length+' did not go: '+failed.slice(0,3).join(', ')+(failed.length>3?', and '+(failed.length-3)+' more':''):'')+'. Rebuild the campaign to put them in the calendar.')
+  :('Upload failed for '+failed.length+' photo'+(failed.length===1?'':'s')+(failed.length?' — '+failed[0]:'')+'.');
  input.value='';await refreshPhotoAssets();
 }
 // A live campaign's calendar must show what the backend actually stored. Opening a campaign

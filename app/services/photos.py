@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.parse
 import uuid
 from urllib.parse import urljoin, urlparse
 
@@ -551,6 +552,45 @@ async def _photos_on_page(client: httpx.AsyncClient, url: str, limit: int,
     return extract_image_urls(html, url, limit=limit)
 
 
+def address_from_url(listing_url: str) -> str:
+    """The street address a portal URL already spells out.
+
+    zillow.com/homedetails/4422-Clay-St-Redding-CA-96003/15238205_zpid/
+        -> 4422 Clay St, Redding, CA 96003
+    redfin.com/CA/Redding/1354-Harpole-Rd-96002/home/139453215
+        -> 1354 Harpole Rd, Redding, CA 96002
+    realtor.com/realestateandhomes-detail/6495-Mojave-Ct_Anderson_CA_96007_M12345
+        -> 6495 Mojave Ct, Anderson, CA 96007
+
+    Every portal puts the address in the path because that is their SEO, and it is worth
+    reading for one reason: the Trulia lookup is the route that survives a datacenter IP,
+    and it needs an address to search for even when the campaign has none yet.
+    """
+    parts = [p for p in urllib.parse.urlparse(listing_url).path.split("/") if p]
+    for part in parts:  # realtor.com: underscores
+        m = re.match(r"^(\d{1,6}(?:-[A-Za-z0-9]+)+)_([A-Za-z][A-Za-z .]*(?:-[A-Za-z]+)*)_([A-Z]{2})_(\d{5})", part)
+        if m:
+            return (f"{m.group(1).replace('-', ' ')}, "
+                    f"{m.group(2).replace('-', ' ')}, {m.group(3)} {m.group(4)}")
+    for part in parts:  # zillow.com: street-city-state-zip
+        m = re.match(r"^(\d{1,6}(?:-[A-Za-z0-9]+)+)-([A-Za-z][A-Za-z]*(?:-[A-Za-z]+)*)-([A-Z]{2})-(\d{5})$", part)
+        if m:
+            return (f"{m.group(1).replace('-', ' ')}, "
+                    f"{m.group(2).replace('-', ' ')}, {m.group(3)} {m.group(4)}")
+    for i, part in enumerate(parts):  # redfin.com: street-zip, city and state before it
+        m = re.match(r"^(\d{1,6}(?:-[A-Za-z0-9]+)+)-(\d{5})$", part)
+        if not m or i < 1:
+            continue
+        street, zipcode = m.group(1).replace('-', ' '), m.group(2)
+        # /CA/Redding/1354-Harpole-Rd-96002/... puts the state two segments back;
+        # /Redding-CA/1354-Harpole-Rd-96002/... puts it one back.
+        if i >= 2 and re.fullmatch(r"[A-Z]{2}", parts[i - 2]):
+            return f"{street}, {parts[i - 1].replace('-', ' ')}, {parts[i - 2]} {zipcode}"
+        if re.fullmatch(r"[A-Z]{2}", parts[i - 1]):
+            return f"{street}, {parts[i - 1]} {zipcode}"
+    return ""
+
+
 async def _trulia_by_address(client: httpx.AsyncClient, address: str, zipcode: str,
                              limit: int, trace: list | None) -> list[str]:
     city_url = _trulia_city_url(address, zipcode)
@@ -587,8 +627,9 @@ async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.A
         # A listing dashboard (Fotello, an MLS, a Drive folder) renders its gallery after a
         # sign-in, so the public HTML holds one hero image at most. A handful of photos is not
         # a gallery either: top it up from the address, which is the same inventory on Trulia.
-        if address and len(urls) < 4:
-            extra = await _trulia_by_address(client, address, zipcode, limit, trace)
+        lookup = address or address_from_url(listing_url)
+        if lookup and len(urls) < 4:
+            extra = await _trulia_by_address(client, lookup, zipcode, limit, trace)
             for u in extra:
                 if u not in urls:
                     urls.append(u)

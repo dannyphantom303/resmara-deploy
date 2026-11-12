@@ -265,6 +265,7 @@ async def chat_json(
     model: str,
     max_completion_tokens: int = 4000,
     reasoning_effort: str | None = None,
+    timeout: float | None = None,
 ) -> dict:
     """Chat Completions call forced to a JSON object. Raises LLMError on failure."""
     if not llm_available():
@@ -282,7 +283,9 @@ async def chat_json(
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
 
-    data = await _post("/chat/completions", payload)
+    # A plan call that thinks for three minutes and then runs out of room is worse than one
+    # that gives up in ninety seconds: the calendar pass below can always finish the job.
+    data = await _post("/chat/completions", payload, timeout=timeout)
     content = _reply_text(data)
     if content is None:
         raise LLMError(f"chat_json: unexpected response shape: {str(data)[:300]}")

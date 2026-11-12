@@ -64,6 +64,11 @@ TAG_CALL_TIMEOUT = 60.0
 # configured model does that on the first photo, tagging tries these once, in order, and keeps
 # whichever one can actually see. RESMARA_MODEL_VISION wins over the list when it is set.
 VISION_FALLBACK_MODELS = ("gemma4:31b",)
+# How many calendar slots to ask for in one go when the plan is being drafted in pieces.
+CALENDAR_BATCH = 5
+# The one-pass plan is a convenience, not the plan of record: if it has not answered in three
+# minutes the calendar pass takes over, which is why a build always ends with a full calendar.
+PLAN_CALL_TIMEOUT = 150.0
 
 # Rooms that stop a scroll, best first. Only used to break a tie between photos that scored the
 # same, so a hero exterior never loses to a laundry-room shot.
@@ -562,6 +567,10 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
     async def _look(image_url: str) -> str:
         candidates = [pick["model"]]
         if not pick["settled"]:
+            # Known vision models first, the configured model after them. A text-only model
+            # sometimes answers a photo with plausible-looking tags (one real build tagged 3 of
+            # 8 that way, the rest came back empty), so "it answered once" is not proof it can
+            # see. Cost of being wrong here is the whole gallery chosen by upload order.
             candidates += [m for m in VISION_FALLBACK_MODELS if m not in candidates]
         last: Exception | None = None
         for model in candidates:
@@ -746,8 +755,25 @@ async def _fill_missing_posts(plan: dict, missing: list, *, days: int, per_day: 
             reasoning_effort="low",
         )
     except Exception as exc:
+        if len(missing) > 2:
+            # Ask for half as much. A model that runs out of room on five posts usually
+            # finishes two, and two is better than a hole in the calendar.
+            half = len(missing) // 2
+            got = await _fill_missing_posts(
+                plan, missing[:half], days=days, per_day=per_day, photo_index=photo_index,
+                closing_line=closing_line, address=address, agent=agent, brand_json=brand_json,
+                facts=facts, notes=notes, engine_notes=[])
+            got += await _fill_missing_posts(
+                plan, missing[half:], days=days, per_day=per_day, photo_index=photo_index,
+                closing_line=closing_line, address=address, agent=agent, brand_json=brand_json,
+                facts=facts, notes=notes, engine_notes=engine_notes)
+            if got:
+                engine_notes.append(
+                    f"The {len(missing)} missing slot(s) were drafted in smaller pieces after "
+                    f"one attempt came back incomplete ({type(exc).__name__}).")
+            return got
         engine_notes.append(f"Could not draft the {len(missing)} missing calendar slot(s) "
-                            f"({type(exc).__name__}); the campaign is short by that many.")
+                            f"({str(exc)[:160]}); the campaign is short by that many.")
         return 0
     new_posts = []
     if isinstance(extra, dict):
@@ -1026,36 +1052,52 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         property_page_url=property_website,
         property_page_text=_trunc(property_page_text, 4000),
     )
-    plan = await llm.chat_json(
-        prompts.R4_PLAN_SYSTEM,
-        r4_user,
-        model=settings.OPENAI_MODEL_PLAN,
-        max_completion_tokens=40000,
-        reasoning_effort="medium",
-    )
+    try:
+        plan = await llm.chat_json(
+            prompts.R4_PLAN_SYSTEM,
+            r4_user,
+            model=settings.OPENAI_MODEL_PLAN,
+            max_completion_tokens=12000,
+            reasoning_effort="low",
+            timeout=PLAN_CALL_TIMEOUT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # A reasoning model that spends its whole budget thinking never closes the JSON. That
+        # is a bad plan, not a dead campaign: the slot pass below drafts the calendar in small
+        # batches, which every model can finish.
+        plan = {}
+        engine_notes.append(
+            f"The plan was not written in one pass ({str(exc)[:140]}); the calendar was "
+            "drafted in smaller pieces instead.")
     # --- repair the rules models drift on, then validate --------------------
     # A plan that is short by a few posts is the whole "14 posts" promise broken, so fill the
     # empty calendar slots before any other repair runs.
     closing_line = llm._closing_line(agent or "MISSING", phone, license_, brokerage)
-    if isinstance(plan, dict) and plan.get("posts"):
+    if not isinstance(plan, dict):
+        plan = {}
+    plan, missing_slots = _normalise_calendar(plan, days, per_day)
+    say("calendar drafted", posts=total_posts - len(missing_slots), missing=len(missing_slots))
+    # Five slots at a time: a batch the model can finish is worth more than one heroic ask, and
+    # a truncated batch then costs five posts instead of the whole campaign.
+    rounds = 0
+    while missing_slots and rounds < 8:
+        rounds += 1
+        before = len(missing_slots)
+        batch = missing_slots[:CALENDAR_BATCH]
+        await _fill_missing_posts(
+            plan, batch, days=days, per_day=per_day,
+            photo_index=photo_index, closing_line=closing_line, address=address,
+            agent=agent, brand_json=brand_json, facts=facts, notes=notes,
+            engine_notes=engine_notes)
+        # Re-read the calendar after every batch: the list of holes shrinks, and walking it
+        # with a running offset is how a live build skipped days 6 to 10 and stopped at nine.
         plan, missing_slots = _normalise_calendar(plan, days, per_day)
-        say("calendar drafted", posts=len(_calendar_slots(days, per_day)) - len(missing_slots),
-            missing=len(missing_slots))
-        if missing_slots:
-            await _fill_missing_posts(
-                plan, missing_slots, days=days, per_day=per_day,
-                photo_index=photo_index, closing_line=closing_line, address=address,
-                agent=agent, brand_json=brand_json, facts=facts, notes=notes,
-                engine_notes=engine_notes)
-            plan, still_missing = _normalise_calendar(plan, days, per_day)
-            if still_missing:
-                missing_info_early = (
-                    f"This campaign is {len(still_missing)} post(s) short of the {days * per_day} "
-                    "the scope asked for.")
-            else:
-                missing_info_early = None
-        else:
-            missing_info_early = None
+        if len(missing_slots) >= before:
+            break  # a round that filled nothing will not fill anything; say so instead
+    if missing_slots:
+        missing_info_early = (
+            f"This campaign is {len(missing_slots)} post(s) short of the {days * per_day} "
+            "the scope asked for.")
     else:
         missing_info_early = None
     plan, repairs = _repair_video_mix(plan, days, per_day)
@@ -1110,10 +1152,15 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     # model answers "NEEDS PHOTO" when it cannot tell the photos apart). Fill those slots from
     # the ranked gallery - strongest selling photo first, each used once - never from upload
     # order, so a blank slot never becomes a photo of the laundry room.
-    gallery_urls = [
-        {"url": getattr(a, "url", ""), "score": (_photo_strength(a)[1] * -1)}
-        for a in galleries_ranked(intact) if getattr(a, "url", "")
-    ]
+    # The score carries the same order the PHOTO INDEX uses: a photo the model marked
+    # "POST: no" ranks below every usable photo however well it scored, and beyond that the
+    # SOCIAL score decides. -100 is enough to put an unusable photo behind a zero-scoring one.
+    gallery_urls = []
+    for a in galleries_ranked(intact):
+        if not getattr(a, "url", ""):
+            continue
+        usable, neg_score = _photo_strength(a)[0], _photo_strength(a)[1]
+        gallery_urls.append({"url": a.url, "score": (neg_score * -1) - (0 if usable else 100)})
 
     base_date = date.today()
     if getattr(boost, "go_live_date", None):
