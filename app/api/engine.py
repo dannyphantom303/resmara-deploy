@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from typing import Optional
 import asyncio
 import time
+from datetime import datetime, timezone
 
 from app.db.session import get_db, SessionLocal, User, Boost, AdAccount, Post, Event
 from app.core.security import get_current_user
@@ -85,7 +86,13 @@ async def _run_build(boost_id: int, user_id: int, force: bool, openings: Optiona
         _log(db, user, boost_id, "build_started", {"force": bool(force)})
         db.commit()
         from app.services import llm
-        result = await run_engine(boost, db, force=force, openings=openings)
+
+        def progress(stage, **extra):
+            """Told where the engine has got to; a poll reads it back as build_progress."""
+            state["stage"] = stage
+            _progress(db, user_id, boost_id, stage, **extra)
+
+        result = await run_engine(boost, db, force=force, openings=openings, progress=progress)
         spent = llm.take_usage()
         state.update({
             "status": "done",
@@ -138,9 +145,10 @@ async def build_campaign(boost_id: int, body: BuildRequest = BuildRequest(),
     """
     boost = _owned_boost(boost_id, current_user, db)
     require_paid(boost, current_user, db)
-    state = _BUILDS.get(boost.id) or {}
-    if state.get("status") == "running" and not body.force and not _is_stale(state):
-        return {"status": "running", "boost_id": boost.id, "started_at": state.get("started_at")}
+    running = _durable_build_state(db, boost)
+    if running.get("status") == "running" and not body.force:
+        return {"status": "running", "boost_id": boost.id,
+                "started_at": running.get("started_at"), "stage": running.get("stage")}
     task = asyncio.create_task(_run_build(boost.id, current_user.id, body.force, body.openings))
     _BUILD_TASKS.add(task)          # strong reference: the loop's own reference is weak
     task.add_done_callback(_BUILD_TASKS.discard)
@@ -148,19 +156,66 @@ async def build_campaign(boost_id: int, body: BuildRequest = BuildRequest(),
     return {"status": "running", "boost_id": boost.id, "started_at": _BUILDS[boost.id]["started_at"]}
 
 
-def _is_stale(state: dict) -> bool:
-    """True when a run still says 'running' but has been going longer than any real build."""
-    started = state.get("started_at") or 0
-    return bool(started) and (time.time() - started) > BUILD_DEADLINE_SECONDS
+# The event types that tell a build's story, in order. Everything /build-status says is read
+# back from these, not from a dict in memory: a free instance restarts, a deploy swaps the
+# process, and an in-memory "running" flag then either lies for ever or — worse — makes a
+# healthy build look dead the moment the poll lands in a process that never saw it start.
+_LIFECYCLE_EVENTS = ("build_started", "build_progress", "campaign_built", "error")
+
+
+def _as_utc(when):
+    """A timestamp from the database, always comparable to now (UTC)."""
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        return when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc)
 
 
 def _last_build_event(db: Session, boost_id: int):
     """The most recent build-lifecycle event for this boost, if any."""
     return (db.query(Event)
-            .filter(Event.boost_id == boost_id,
-                    Event.event_type.in_(("build_started", "campaign_built", "error")))
+            .filter(Event.boost_id == boost_id, Event.event_type.in_(_LIFECYCLE_EVENTS))
             .order_by(Event.id.desc())
             .first())
+
+
+def _durable_build_state(db: Session, boost: Boost) -> dict:
+    """What this boost's last build is doing, read from the events so every worker agrees."""
+    last = _last_build_event(db, boost.id)
+    posts = db.query(Post).filter(Post.boost_id == boost.id).count()
+    if last is None:
+        return {"status": "done" if posts else "idle", "posts_created": posts}
+    payload = last.payload or {}
+    if last.event_type == "campaign_built":
+        return {"status": "done", "posts_created": posts,
+                "source": payload.get("source"),
+                "violations": payload.get("violations") or 0}
+    if last.event_type == "error":
+        return {"status": "error", "posts_created": posts,
+                "error": payload.get("error") or INTERRUPTED_ERROR}
+    started = _as_utc(last.created_at)
+    age = (datetime.now(timezone.utc) - started).total_seconds() if started else 0
+    if age <= BUILD_DEADLINE_SECONDS:
+        return {"status": "running", "stage": payload.get("stage"),
+                "started_at": started.timestamp() if started else None}
+    return {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True,
+            "posts_created": posts}
+
+
+def _progress(db: Session, user_id: int, boost_id: int, stage: str, **extra):
+    """Note where a long build has got to, so a poll can tell 'working' from 'gone'.
+
+    Written on the build's own session. A second connection waits behind the build's open
+    transaction (3.7s per note on SQLite, which held the 202 back by eleven seconds); the
+    engine has committed its own work at every point this is called.
+    """
+    try:
+        db.add(Event(user_id=user_id, boost_id=boost_id, event_type="build_progress",
+                     payload=dict(stage=stage, **extra)))
+        db.commit()
+    except Exception:  # noqa: BLE001 - a lost progress note must never kill the build
+        db.rollback()
 
 
 def _mark_interrupted(db: Session, boost: Boost, reason: str, user_id: int | None = None):
@@ -177,29 +232,21 @@ def build_status(boost_id: int, current_user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
     """How the last build for this boost is going (the UI polls this instead of holding a request)."""
     boost = _owned_boost(boost_id, current_user, db)
-    state = dict(_BUILDS.get(boost.id) or {})
-    posts = db.query(Post).filter(Post.boost_id == boost.id).count()
-    if state.get("status") == "running" and _is_stale(state):
-        # A run that never reports a finish is a dead run, not a slow one.
-        state = {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True}
-        _mark_interrupted(db, boost, "build exceeded the %d minute deadline"
+    state = _durable_build_state(db, boost)
+    if state.get("interrupted"):
+        # Started, never finished, and long past any real run: a dead run, not a slow one.
+        _mark_interrupted(db, boost, "the build started but never finished (%d minute deadline)"
                           % (BUILD_DEADLINE_SECONDS // 60))
-        _BUILDS[boost.id] = dict(state)   # remember it: one report, not one per poll
-    if not state:
-        # No run in this process: either nothing was ever built, or the process restarted
-        # mid-build (a free-tier instance restarts on every deploy). A start with no finish
-        # after it means the build was cut off - say so instead of "In Progress" for ever.
-        last = _last_build_event(db, boost.id)
-        if last is not None and last.event_type == "build_started" and posts == 0:
-            state = {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True}
-            _mark_interrupted(db, boost, "the server restarted while the build was running")
-        else:
-            state = {"status": "done" if posts else "idle", "posts_created": posts}
+        _BUILDS[boost.id] = {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True}
+    # The events carry the outcome; the in-memory run carries the detail nobody stores
+    # (notes, token spend, which posts were repaired).
+    run = _BUILDS.get(boost.id) or {}
+    if run and run.get("status") == state.get("status") == "done":
+        state.update({k: v for k, v in run.items() if k in ("notes", "tokens", "source", "violations")})
     state["boost_id"] = boost.id
-    if state.get("started_at") and state.get("finished_at"):
-        state["seconds"] = round(state["finished_at"] - state["started_at"], 1)
-    state.pop("started_at", None)
-    state.pop("finished_at", None)
+    started = state.get("started_at")
+    if started:
+        state["seconds"] = round(time.time() - started, 1)
     return state
 
 

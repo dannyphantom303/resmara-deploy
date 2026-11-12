@@ -96,6 +96,40 @@ def main() -> int:
         posts = client.get(f"/api/boosts/{boost_id}/posts", headers=h).json()
         check("the posts are readable afterwards", len(posts) == 14, str(len(posts)))
 
+        # A build that is genuinely running must read as running. This is what the live site got
+        # wrong: the status came from a dict in the web process, so the first poll after a deploy
+        # saw an empty dict, called a healthy build "interrupted" and marked it Build failed. The
+        # answer is read from the event log now, so any process gives the same one.
+        from datetime import timedelta
+        from app.api.engine import _durable_build_state
+        from app.db.session import Boost, Event, Post, SessionLocal
+
+        fresh = SessionLocal()
+        try:
+            boost_row = fresh.query(Boost).filter(Boost.id == boost_id).first()
+            fresh.query(Post).filter(Post.boost_id == boost_id).delete()
+            fresh.query(Event).filter(Event.boost_id == boost_id).delete()
+            fresh.add(Event(user_id=boost_row.user_id, boost_id=boost_id, event_type="build_started",
+                            payload={"force": True}))
+            fresh.commit()
+            state = _durable_build_state(fresh, boost_row)
+            check("a build that just started reads as running", state.get("status") == "running", str(state))
+
+            fresh.query(Event).filter(Event.boost_id == boost_id).update(
+                {"created_at": datetime.utcnow() - timedelta(seconds=16 * 60)})
+            fresh.commit()
+            stale = _durable_build_state(fresh, boost_row)
+            check("a run past the deadline reads as interrupted",
+                  stale.get("status") == "error" and stale.get("interrupted") is True, str(stale))
+
+            fresh.add(Event(user_id=boost_row.user_id, boost_id=boost_id, event_type="campaign_built",
+                            payload={"posts": 14, "source": "offline"}))
+            fresh.commit()
+            done = _durable_build_state(fresh, boost_row)
+            check("a finished build reads as done", done.get("status") == "done", str(done))
+        finally:
+            fresh.close()
+
         second = client.post(f"/api/boosts/{boost_id}/build", headers=h, json={"force": True})
         check("a forced rebuild can start again", second.status_code == 202, str(second.status_code))
 

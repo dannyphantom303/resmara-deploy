@@ -768,11 +768,22 @@ def _repair_video_mix(plan: dict, days: int, per_day: int):
 
 
 async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
-                         openings=None) -> dict:
+                         openings=None, progress=None) -> dict:
     """Run R1 -> R2 -> R3 -> R4, validate, and persist the campaign.
 
     See the module docstring for where each prompt field comes from.
+
+    `progress(stage, **detail)` is optional: the API layer writes it to the event log so a
+    build that takes ten minutes can be told apart from one that died.
     """
+    def say(stage: str, **detail):
+        if progress is None:
+            return
+        try:
+            progress(stage, **detail)
+        except Exception:  # noqa: BLE001 - progress is a courtesy, never a build blocker
+            pass
+
     # Name the engine honestly: a local Ollama base is not OpenAI, and the build response feeds
     # the UI note about who drafted the calendar.
     info = llm.engine_info() or {}
@@ -853,6 +864,8 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                     untagged[:MAX_TAG_PHOTOS], base_url=settings.PUBLIC_BASE_URL, db=db)
                 if db is not None:
                     db.commit()
+                say("photos tagged", tagged=tag_result.get("tagged"),
+                    photos=len(intact), engine=tag_result.get("source"))
                 if tag_result.get("tagged"):
                     engine_notes.append(
                         f"Tagged {tag_result['tagged']} of {len(untagged)} listing photos before planning "
@@ -914,6 +927,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     style = _trunc(style, 5000)
 
     # --- R4: the campaign plan (Chat Completions -> JSON) -------------------
+    say("planning the calendar", days=days, per_day=per_day)
     r4_user = prompts.R4_PLAN_USER.format(
         agent=agent,
         address=address,
@@ -951,6 +965,8 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     closing_line = llm._closing_line(agent or "MISSING", phone, license_, brokerage)
     if isinstance(plan, dict) and plan.get("posts"):
         plan, missing_slots = _normalise_calendar(plan, days, per_day)
+        say("calendar drafted", posts=len(_calendar_slots(days, per_day)) - len(missing_slots),
+            missing=len(missing_slots))
         if missing_slots:
             await _fill_missing_posts(
                 plan, missing_slots, days=days, per_day=per_day,
@@ -1052,6 +1068,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                      db.query(Post).filter(Post.boost_id == boost.id).all()}
                     if db is not None else {})
 
+    say("writing posts")
     posts_created = 0
     for index, p in enumerate(plan_posts):
         if not isinstance(p, dict):
