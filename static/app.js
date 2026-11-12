@@ -324,7 +324,7 @@ async function startCampaignScope(button){
   // empty gallery here means a text-only calendar later. A bot-walled listing is not fatal.
   if(progress?.isConnected)progress.textContent='Finding the photos on your listing…';
   try{
-   const pulled=await RM.importPhotos(boost.id,{listingUrl:submitted.url||undefined,urls:[...(submitted.photos||[])].slice(0,10),limit:10});
+   const pulled=await RM.importPhotos(boost.id,{listingUrl:submitted.url||undefined,urls:[...(submitted.photos||[])].slice(0,20),limit:20});
    if(progress?.isConnected&&pulled&&pulled.imported)progress.textContent='Imported '+pulled.imported+' listing photos. Linking your ad account…';
   }catch(photoError){/* keep going: the photos can be added from the campaign page */}
   liveCampaignsSyncedAt=0;

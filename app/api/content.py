@@ -54,7 +54,23 @@ def _save_upload(file: UploadFile) -> tuple[str, str, int]:
     filepath = os.path.join(UPLOAD_DIR, filename)
     with open(filepath, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    return filename, f"/uploads/{filename}", os.path.getsize(filepath)
+    size = os.path.getsize(filepath)
+    # Some upload paths append NUL padding after a finished image (37 photos in one gallery
+    # arrived as a whole JPEG padded out to exactly 3 MiB). The picture is fine, the padding is
+    # not: it inflates the stored row and makes the end-of-file checks lie. Trim it on the way in.
+    if ext in (".jpg", ".jpeg", ".png"):
+        from app.services.photos import clean_image_bytes
+        try:
+            with open(filepath, "rb") as fh:
+                raw = fh.read()
+            clean = clean_image_bytes(raw)
+            if len(clean) != len(raw):
+                with open(filepath, "wb") as fh:
+                    fh.write(clean)
+                size = len(clean)
+        except OSError:
+            pass
+    return filename, f"/uploads/{filename}", size
 
 
 # A free-tier instance rebuilds its disk on every deploy, so the uploaded bytes live in the
@@ -162,9 +178,11 @@ async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User
             return {"boost_id": boost.id, "source": source, "found": 0, "imported": 0,
                     "assets": [], "skipped": [],
                     "tried": trace,
-                    "detail": "That page did not give up its photos. Zillow, Realtor, "
-                              "Redfin and Homes.com block server-side reads — paste direct "
-                              "image URLs, or a Movoto or Trulia listing link."}
+                    "detail": "That page did not give up its photos. A listing dashboard that "
+                              "needs a sign-in (Fotello, an MLS, a Drive folder) keeps its "
+                              "gallery behind the login, and Zillow, Realtor, Redfin and "
+                              "Homes.com block server-side reads — upload the photo files, or "
+                              "paste direct image URLs, or use a Movoto or Trulia listing link."}
 
     result = await photos.import_from_urls(
         db, user_id=current_user.id, boost_id=boost.id, urls=urls,

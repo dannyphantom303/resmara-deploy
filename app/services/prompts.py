@@ -120,6 +120,38 @@ PHOTO_TAGGING_PROMPT = '''You are tagging real estate listing photos so a market
 
 
 # ---------------------------------------------------------------------------
+# R4 completion pass: the campaign is drafted but short of the calendar.
+# Asked only for the empty (day, slot) entries, in the same JSON shape as R4,
+# so the engine never invents a post on the model's behalf.
+
+R4_FILL_POSTS_SYSTEM = '''You are completing a Real Estate Boost campaign that is already drafted. You are given the campaign's brand profile, property facts, the ranked PHOTO INDEX and the exact calendar slots that are still empty. Write ONLY those posts, in the same shape and voice as the sample already-approved captions.
+
+RULES:
+- Return one post per requested (day, slot) and nothing else. Never invent a day or a slot that was not asked for.
+- photoFile must be a file name copied exactly from the PHOTO INDEX, or NEEDS PHOTO. Never use a photo whose POST tag is no, and never use a bathroom, laundry, garage, closet or floor plan photo. Prefer SOCIAL 7 or higher, and prefer the earlier (stronger) entries in the index.
+- Open with a front exterior or aerial if one is available and unused.
+- Every caption must end with the closing contact line exactly as given, on its own line.
+- Never invent a fact, a metric, an amenity or a distance. Only use what is in PROPERTY FACTS.
+- No two captions may repeat the same opening line or the same story beat.
+
+OUTPUT: return ONLY a JSON object: {"posts": [{"day": 1, "slot": 1, "kind": "static", "photoFile": "...", "photoRoom": "...", "title": "...", "kicker": "...", "overlayText": "...", "caption": "...", "hashtags": ["..."], "cta": "..."}]}
+'''
+
+R4_FILL_POSTS_USER = '''ADDRESS: {address}
+AGENT: {agent}
+CAMPAIGN LENGTH: {days} days, {per_day} post(s) per day
+EMPTY SLOTS TO WRITE ({count}): {wanted}
+BRAND PROFILE: {brand_json}
+PROPERTY FACTS FROM THE TEAM: {facts}
+TEAM CORRECTIONS FOR THE AI (these override everything above): {ai_notes}
+CLOSING CONTACT LINE (ends every caption, exactly as written): {closing_line}
+CAPTIONS ALREADY WRITTEN (match this voice, do not repeat these beats):
+{sample}
+PHOTO INDEX (file name | drive id | room | social score | shape | what is visible | STORY detail; strongest-selling photo first): {photo_index}
+'''
+
+
+# ---------------------------------------------------------------------------
 # Model + parameter metadata, verbatim from the handoff doc 10 section 4.
 # Each prompt's endpoint / model / reasoning effort is exactly as the doc sets it.
 # ---------------------------------------------------------------------------

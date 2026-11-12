@@ -40,7 +40,7 @@ async function importListingPhotos(button){
  if(!/^https?:\/\//i.test(url)){if(status)status.textContent='Paste the full listing link first.';if(field)field.focus();return}
  button.disabled=true;if(status)status.textContent='Pulling the gallery from that page…';
  try{
-  const res=await RM.importPhotos(boostId,{listingUrl:url,limit:10});
+  const res=await RM.importPhotos(boostId,{listingUrl:url,limit:20});
   const n=(res&&res.imported)||0;
   if(status)status.textContent=n
    ?'Imported '+n+' photo'+(n===1?'':'s')+'. Rebuild the campaign to put them in the calendar.'
@@ -191,7 +191,7 @@ function saveCampaignScope(form){
  const gallery=String(r.scope.media||r.scope.listing||'').trim();
  const boostId=reviewCampaignBoostId();
  if(boostId!=null&&window.RM&&/^https?:\/\//i.test(gallery)){
-  RM.importPhotos(boostId,{listingUrl:gallery,limit:10}).then(res=>{
+  RM.importPhotos(boostId,{listingUrl:gallery,limit:20}).then(res=>{
    if(res&&res.imported)toast('Imported '+res.imported+' listing photo'+(res.imported===1?'':'s')+'.');
    else if(res&&res.detail)toast(res.detail);
    refreshPhotoAssets();

@@ -28,6 +28,7 @@ deterministic fixtures in app.services.llm and the result carries source="offlin
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import mimetypes
@@ -38,6 +39,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.db.session import Ad, Asset, Post
 from app.services import llm, prompts
+from app.services import photos as photos_service
 from app.services.plan_rules import CLOSING_LINE_RE, caption_body_and_closing, validate_plan
 
 # The agent-card keys the pipeline understands (doc 10 inputs, reshaped for Resmara).
@@ -49,11 +51,21 @@ AGENT_CARD_KEYS = (
     "property_page_text",
 )
 
-# A listing gallery is 8-20 photos; tagging more than this spends vision calls for photos
-# the plan will not reach anyway.
-# The vision tagger ran one call per photo and stopped at twelve, so a 14-photo gallery left
-# two photos with no room, no tags and no way for the plan to choose them.
-MAX_TAG_PHOTOS = 20
+# A listing gallery is a whole shoot: 40-60 photos is normal. Tagging used to stop at twelve,
+# then at twenty, which left the rest with no room, no score and no way for the plan to choose
+# them - so a 14-post campaign used the first photos in upload order instead of the ones that
+# sell the house. Tag all of them, a few at a time.
+MAX_TAG_PHOTOS = 60
+TAG_CONCURRENCY = 4
+
+# Rooms that stop a scroll, best first. Only used to break a tie between photos that scored the
+# same, so a hero exterior never loses to a laundry-room shot.
+_ROOM_PRIORITY = (
+    "front exterior", "aerial", "rear exterior", "kitchen", "living room",
+    "primary bedroom", "primary bath", "bathroom", "dining room", "office",
+    "bedroom", "laundry", "garage", "street view", "detail",
+)
+
 
 # The doc-14 ROOM values (used only for a sanity check on offline tagging).
 _DOC_ROOMS = {
@@ -122,17 +134,55 @@ def _trunc(text, limit: int) -> str:
 # ---------------------------------------------------------------------------
 # PHOTO INDEX (doc 10 section 2, built from the Asset rows)
 # ---------------------------------------------------------------------------
+def _tag_value(asset, key: str) -> str:
+    """Read one tag back out of the 'KEY: value' strings the tagger stored."""
+    for tag in (getattr(asset, "tags", None) or []):
+        s = str(tag)
+        if s.upper().startswith(key.upper() + ":"):
+            return s.split(":", 1)[1].strip()
+    return ""
+
+
+def _photo_strength(asset) -> tuple:
+    """Sort key for the gallery: the photo most likely to sell the house comes first.
+
+    Order is: usable (the tagger did not mark it POST: no), then the vision model's SOCIAL
+    score, then how much the room sells, then upload order as the final tie-break. Untagged
+    photos land in the middle on score 0 instead of leading the index just because they were
+    uploaded first.
+    """
+    post = _tag_value(asset, "POST").lower()
+    score = _as_int(getattr(asset, "social_score", None))
+    if score is None:
+        score = _as_int(_tag_value(asset, "SOCIAL")) or 0
+    room = str(getattr(asset, "room", "") or _tag_value(asset, "ROOM")).strip().lower()
+    rank = len(_ROOM_PRIORITY)
+    for i, name in enumerate(_ROOM_PRIORITY):
+        if room == name or (name in room and room):
+            rank = i
+            break
+    return (1 if post == "no" else 0, -score, rank, _as_int(getattr(asset, "id", None)) or 0)
+
+
+def galleries_ranked(assets) -> list:
+    """Photo Assets ordered strongest-first (the order the plan and the fallback both use)."""
+    photos = [a for a in (assets or []) if getattr(a, "kind", "photo") == "photo"]
+    return sorted(photos, key=_photo_strength)
+
+
 def build_photo_index(assets) -> str:
     """One line per photo Asset, fields in the doc's order, joined by ' ;; '.
 
     Line:  file name | id | room | social score | shape | what is visible (SEE) | STORY detail
     with any tags appended. Only kind == 'photo' rows are included; references,
     headshots and designs are skipped. Returns '' when there are no photos.
+
+    Lines are ordered strongest-first (see _photo_strength): a model that just walks down the
+    list still posts the hero photo before the laundry room, and an untagged gallery no longer
+    reads in upload order.
     """
     lines = []
-    for a in assets or []:
-        if getattr(a, "kind", "photo") != "photo":
-            continue
+    for a in galleries_ranked(assets):
         parts = [
             str(getattr(a, "filename", "") or ""),
             str(getattr(a, "id", "") or ""),
@@ -154,25 +204,72 @@ def build_photo_index(assets) -> str:
     return " ;; ".join(lines)
 
 
-def post_image_urls(plan_posts, url_by_file: dict, gallery_urls: list[str]) -> tuple[list[str], int]:
-    """The image for each plan post, in plan order, plus how many were rotated in.
+_INDEX_ORDER_NOTE = (
+    "ORDERED STRONGEST-SELLING PHOTO FIRST: the first lines are the photos most likely to stop "
+    "a scroll. When two photos are equally good, prefer the earlier one.\n"
+)
 
-    A post gets the photo the plan named when that name is a real Asset. When the plan names
-    nothing usable ("NEEDS PHOTO" is the repaired form of an empty photoFile) the gallery is
-    rotated instead of leaving the card blank — the model often cannot tell the photos apart
-    even though the agent uploaded them.
+
+def index_for_prompt(photo_index: str) -> str:
+    """The PHOTO INDEX as the planner sees it, with its ordering stated (empty stays empty)."""
+    return (_INDEX_ORDER_NOTE + photo_index) if photo_index else ""
+
+
+def post_image_urls(plan_posts, url_by_file: dict, gallery_urls) -> tuple[list[str], int]:
+    """The image for each plan post, in plan order, plus how many the engine had to pick.
+
+    A post gets the photo the plan named when that name is a real Asset. Otherwise the gallery
+    is walked in the order it is handed in — strongest-selling photo first, each photo used once
+    before any repeats — instead of restarting at the top of upload order for every post.
+
+    `gallery_urls` takes plain url strings or {"url", "score"} dicts; dicts are ordered by
+    score when they are given, so the caller can pass the ranked gallery straight through.
     """
-    gallery = [u for u in (gallery_urls or []) if u]
+    entries = []
+    for item in (gallery_urls or []):
+        if isinstance(item, dict):
+            url = item.get("url") or ""
+            entries.append((url, _as_int(item.get("score")) or 0))
+        else:
+            entries.append((item or "", 0))
+    entries = [e for e in entries if e[0]]
+    if any(score for _, score in entries):
+        entries.sort(key=lambda e: -e[1])
+    gallery = [url for url, _ in entries]
+
     urls: list[str] = []
-    rotated = 0
+    picked = 0          # how many photos the engine chose itself (not the plan's choice)
+    cursor = 0          # where the cycle stands on a gallery smaller than the calendar
+    used: set = set()
     for post in plan_posts or []:
         named = post.get("photoFile") if isinstance(post, dict) else None
         url = url_by_file.get(named, "") if named else ""
-        if not url and gallery:
-            url = gallery[rotated % len(gallery)]
-            rotated += 1
-        urls.append(url or "")
-    return urls, rotated
+        if url and url not in used:
+            used.add(url)
+            urls.append(url)
+            continue
+        # Nothing named (or a photo already on another post): take the best unused photo.
+        choice = ""
+        for candidate in gallery:
+            if candidate not in used:
+                choice = candidate
+                break
+        if not choice and gallery:
+            # Gallery smaller than the calendar: cycle it, but never put the same photo on two
+            # posts in a row.
+            previous = urls[-1] if urls else ""
+            for step in range(len(gallery)):
+                candidate = gallery[(cursor + step) % len(gallery)]
+                if candidate != previous or len(gallery) == 1:
+                    choice = candidate
+                    cursor = (cursor + step) % len(gallery)
+                    break
+        if choice:
+            used.add(choice)
+            cursor = (cursor + 1) % len(gallery) if gallery else 0
+            picked += 1
+        urls.append(choice or url or "")
+    return urls, picked
 
 
 def _asset_url_map(assets) -> dict:
@@ -390,13 +487,19 @@ def _image_content_url(asset, root: str) -> str:
     return url
 
 
-async def tag_assets(assets, *, base_url: str = "", db=None) -> dict:
+async def tag_assets(assets, *, base_url: str = "", db=None,
+                    concurrency: int = TAG_CONCURRENCY) -> dict:
     """Tag Asset rows with the doc-14 photo-tagging prompt.
 
     Each Asset image is sent to the vision model as an image_url content part so
     the model can actually see the photo. Fills room, social_score, shape, see,
     story and tags, and sets tagged_by='ai'. One failing photo never aborts the
     batch. Returns {'tagged': N, 'source': 'openai'|'offline', 'errors': [...]}.
+
+    Calls run a few at a time (TAG_CONCURRENCY) instead of one after another: a 56-photo
+    gallery took over twenty minutes sequentially, which outlived the client's own poll and
+    left the campaign stuck "In Progress". Results are applied in upload order, so the same
+    gallery always produces the same tags.
     """
     assets = list(assets or [])
     root = (base_url or settings.PUBLIC_BASE_URL or "").rstrip("/")
@@ -412,48 +515,60 @@ async def tag_assets(assets, *, base_url: str = "", db=None) -> dict:
     tagged = 0
     errors = []
 
-    for a in assets:
-        try:
-            image_url = _image_content_url(a, root)
-            line = await llm.chat_text(
-                prompts.PHOTO_TAGGING_PROMPT,
-                "Tag this listing photo.",
-                model=settings.OPENAI_MODEL_CHECK,
-                images=[image_url] if image_url else None,
-                max_completion_tokens=400,
-            )
-            parsed = _parse_tag_line(line)
-            # Deterministic offline fixture always parses to a full tag set.
-            a.room = parsed.get("ROOM", getattr(a, "room", None))
-            a.social_score = parsed.get("SOCIAL", getattr(a, "social_score", None))
-            a.shape = parsed.get("SHAPE", getattr(a, "shape", None))
-            a.see = parsed.get("SEE", getattr(a, "see", None))
-            a.story = parsed.get("STORY", getattr(a, "story", None))
-            a.tags = _tags_from_parsed(parsed)
-            a.tagged_by = "ai"
-            # A reply that parses to nothing is not a tag. Counting it made the endpoint report
-            # "tagged=1" for a photo with no room and no tags at all.
-            if not (a.room or a.tags):
-                errors.append({
-                    "asset_id": getattr(a, "id", None),
-                    "filename": getattr(a, "filename", None),
-                    "error": (
-                        "the vision model returned no usable tags for this photo"
-                        f" (engine={info.get('host') or 'unknown'},"
-                        f" model={settings.OPENAI_MODEL_CHECK}); reply began"
-                        f" {(line or '')[:120]!r}"
-                    ),
-                })
-                continue
-            if db is not None:
-                db.add(a)
-            tagged += 1
-        except Exception as exc:  # keep going: one bad photo must not stop the batch
+    gate = asyncio.Semaphore(max(1, int(concurrency or 1)))
+
+    async def _tag_one(asset):
+        """One vision call. Returns (asset, tag line, error text)."""
+        async with gate:
+            try:
+                image_url = _image_content_url(asset, root)
+                line = await llm.chat_text(
+                    prompts.PHOTO_TAGGING_PROMPT,
+                    "Tag this listing photo.",
+                    model=settings.OPENAI_MODEL_CHECK,
+                    images=[image_url] if image_url else None,
+                    max_completion_tokens=400,
+                )
+                return asset, line, None
+            except Exception as exc:  # keep going: one bad photo must not stop the batch
+                return asset, None, f"{type(exc).__name__}: {exc}"
+
+    results = await asyncio.gather(*[_tag_one(a) for a in assets])
+
+    for a, line, failure in results:
+        if failure:
             errors.append({
                 "asset_id": getattr(a, "id", None),
                 "filename": getattr(a, "filename", None),
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": failure,
             })
+            continue
+        parsed = _parse_tag_line(line)
+        # Deterministic offline fixture always parses to a full tag set.
+        a.room = parsed.get("ROOM", getattr(a, "room", None))
+        a.social_score = parsed.get("SOCIAL", getattr(a, "social_score", None))
+        a.shape = parsed.get("SHAPE", getattr(a, "shape", None))
+        a.see = parsed.get("SEE", getattr(a, "see", None))
+        a.story = parsed.get("STORY", getattr(a, "story", None))
+        a.tags = _tags_from_parsed(parsed)
+        a.tagged_by = "ai"
+        # A reply that parses to nothing is not a tag. Counting it made the endpoint report
+        # "tagged=1" for a photo with no room and no tags at all.
+        if not (a.room or a.tags):
+            errors.append({
+                "asset_id": getattr(a, "id", None),
+                "filename": getattr(a, "filename", None),
+                "error": (
+                    "the vision model returned no usable tags for this photo"
+                    f" (engine={info.get('host') or 'unknown'},"
+                    f" model={settings.OPENAI_MODEL_CHECK}); reply began"
+                    f" {(line or '')[:120]!r}"
+                ),
+            })
+            continue
+        if db is not None:
+            db.add(a)
+        tagged += 1
 
     if db is not None:
         db.commit()
@@ -483,6 +598,113 @@ def _scrub_stale_video_notes(missing_info: list, plan: dict) -> list:
             continue
         keep.append(note)
     return keep
+
+
+def _calendar_slots(days: int, per_day: int) -> list:
+    """Every (day, slot) the campaign must fill, in publish order."""
+    return [(d, s) for d in range(1, max(1, days) + 1) for s in range(1, max(1, per_day) + 1)]
+
+
+def _normalise_calendar(plan: dict, days: int, per_day: int):
+    """Clamp every post onto the calendar, drop duplicates, and list what is still empty.
+
+    A model asked for 14 posts answers with 10 often enough to matter: the client then opened
+    a campaign that was four days short and could not tell why. This never invents a post; it
+    reports the slots that are missing so the caller can ask for exactly those.
+    """
+    if not isinstance(plan, dict):
+        return plan, []
+    posts = plan.get("posts")
+    if not isinstance(posts, list):
+        posts = []
+        plan["posts"] = posts
+    seen: set = set()
+    kept: list = []
+    for p in posts:
+        if not isinstance(p, dict):
+            continue
+        day = _as_int(p.get("day"))
+        slot = _as_int(p.get("slot"))
+        day = min(max(day if day is not None else 1, 1), max(1, days))
+        slot = min(max(slot if slot is not None else 1, 1), max(1, per_day))
+        if (day, slot) in seen:
+            continue
+        seen.add((day, slot))
+        p["day"], p["slot"] = day, slot
+        kept.append(p)
+    kept.sort(key=lambda p: (p["day"], p["slot"]))
+    plan["posts"] = kept
+    return plan, [sl for sl in _calendar_slots(days, per_day) if sl not in seen]
+
+
+async def _fill_missing_posts(plan: dict, missing: list, *, days: int, per_day: int,
+                              photo_index: str, closing_line: str, address: str,
+                              agent: str, brand_json: str, facts: str, notes: str,
+                              engine_notes: list) -> int:
+    """Ask the model for just the empty slots and merge them in. Returns how many landed."""
+    existing = [p for p in (plan.get("posts") or []) if isinstance(p, dict)]
+    sample = []
+    for p in existing[:6]:
+        caption = str(p.get("caption") or "").replace("\n", " ")[:220]
+        if caption:
+            sample.append(f"day {p.get('day')} {p.get('kind')}: {caption}")
+    wanted = ", ".join(f"day {d} slot {s}" for d, s in missing)
+    user = prompts.R4_FILL_POSTS_USER.format(
+        address=address,
+        agent=agent or "MISSING",
+        days=days,
+        per_day=per_day,
+        wanted=wanted,
+        count=len(missing),
+        brand_json=_trunc(brand_json, 2000),
+        facts=_trunc(facts, 2500),
+        ai_notes=_trunc(notes, 1500),
+        photo_index=_trunc(index_for_prompt(photo_index), 60000),
+        closing_line=closing_line,
+        sample="\n".join(sample) or "none yet",
+    )
+    try:
+        extra = await llm.chat_json(
+            prompts.R4_FILL_POSTS_SYSTEM,
+            user,
+            model=settings.OPENAI_MODEL_PLAN,
+            max_completion_tokens=8000,
+            reasoning_effort="low",
+        )
+    except Exception as exc:
+        engine_notes.append(f"Could not draft the {len(missing)} missing calendar slot(s) "
+                            f"({type(exc).__name__}); the campaign is short by that many.")
+        return 0
+    new_posts = []
+    if isinstance(extra, dict):
+        new_posts = extra.get("posts") or []
+    elif isinstance(extra, list):
+        new_posts = extra
+    if not isinstance(new_posts, list):
+        new_posts = []
+    wanted_set = set(missing)
+    added = 0
+    for p in new_posts:
+        if not isinstance(p, dict):
+            continue
+        d = _as_int(p.get("day"))
+        s = _as_int(p.get("slot"))
+        if (d, s) not in wanted_set:
+            continue
+        wanted_set.discard((d, s))
+        plan.setdefault("posts", []).append(p)
+        added += 1
+    if added:
+        engine_notes.append(
+            f"The model drafted {len(existing)} post(s) instead of {days * per_day}; the engine "
+            f"asked for the {added} missing day(s)/slot(s) and added them, so the calendar is full."
+        )
+    else:
+        engine_notes.append(
+            f"The model drafted {len(existing)} post(s) instead of {days * per_day}, and the "
+            "follow-up call returned nothing usable for the missing slot(s)."
+        )
+    return added
 
 
 def _repair_video_mix(plan: dict, days: int, per_day: int):
@@ -599,15 +821,31 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     assets = (db.query(Asset).filter(Asset.boost_id == boost.id).all()
               if db is not None else [])
     photos = [a for a in assets if getattr(a, "kind", "photo") == "photo"]
-    photo_index = build_photo_index(assets)
-    no_photos = len(photos) == 0
+    # A photo that ends mid-file (a partial bulk download) cannot be seen by the vision model
+    # and would publish as a broken image, so it never reaches the index the plan chooses from.
+    intact, broken = [], []
+    for a in photos:
+        data = getattr(a, "data", None)
+        name = getattr(a, "original_name", "") or getattr(a, "filename", "") or ""
+        if data and photos_service.looks_incomplete(data, name):
+            broken.append(a)
+        else:
+            intact.append(a)
+    photo_index = build_photo_index(intact)
+    no_photos = len(intact) == 0
+    if broken:
+        engine_notes.append(
+            f"{len(broken)} of the {len(photos)} uploaded photos are incomplete files (they stop "
+            "before the end of the image, usually a partial download or a copy that never "
+            "finished). They were left out: the plan can only choose from the "
+            f"{len(intact)} photo(s) that are whole. Re-export or re-upload the rest.")
 
     # --- photos must be seen before the plan can name them -------------------
     # A freshly imported gallery carries no room/tags, and a plan written from an untagged
     # PHOTO INDEX answered "NEEDS PHOTO" for all 14 slots on a real 2-photo gallery. Tagging
     # runs here, inside the background build, where a vision call cannot cost a proxy timeout.
     if photos:
-        untagged = [a for a in photos
+        untagged = [a for a in intact
                     if not getattr(a, "room", None) and not (getattr(a, "tags", None) or [])]
         if untagged:
             try:
@@ -625,7 +863,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                         f"choose between them (model={settings.OPENAI_MODEL_CHECK}).")
             except Exception as exc:  # tagging is an improvement, never a build blocker
                 engine_notes.append(f"Photo tagging failed ({type(exc).__name__}); planning continued.")
-            photo_index = build_photo_index(assets)
+            photo_index = build_photo_index(intact)
 
     # --- R1: property research (Responses API, web search) ------------------
     r1_input = prompts.R1_PROPERTY_RESEARCH.format(address=address)
@@ -689,7 +927,7 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         brand_json=brand_json,
         style=style,
         phone=phone or "NOT GIVEN",
-        photo_index=_trunc(photo_index, 110000),
+        photo_index=_trunc(index_for_prompt(photo_index), 110000),
         license=license_ or "NOT GIVEN",
         brokerage=brokerage or "NOT GIVEN",
         instagram=instagram or "not given",
@@ -707,12 +945,32 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         max_completion_tokens=40000,
         reasoning_effort="medium",
     )
-
     # --- repair the rules models drift on, then validate --------------------
+    # A plan that is short by a few posts is the whole "14 posts" promise broken, so fill the
+    # empty calendar slots before any other repair runs.
+    closing_line = llm._closing_line(agent or "MISSING", phone, license_, brokerage)
+    if isinstance(plan, dict) and plan.get("posts"):
+        plan, missing_slots = _normalise_calendar(plan, days, per_day)
+        if missing_slots:
+            await _fill_missing_posts(
+                plan, missing_slots, days=days, per_day=per_day,
+                photo_index=photo_index, closing_line=closing_line, address=address,
+                agent=agent, brand_json=brand_json, facts=facts, notes=notes,
+                engine_notes=engine_notes)
+            plan, still_missing = _normalise_calendar(plan, days, per_day)
+            if still_missing:
+                missing_info_early = (
+                    f"This campaign is {len(still_missing)} post(s) short of the {days * per_day} "
+                    "the scope asked for.")
+            else:
+                missing_info_early = None
+        else:
+            missing_info_early = None
+    else:
+        missing_info_early = None
     plan, repairs = _repair_video_mix(plan, days, per_day)
     # Make the closing contact line real and on its own line BEFORE the rules are checked, so the
     # violation list describes the campaign the client will actually see.
-    closing_line = llm._closing_line(agent or "MISSING", phone, license_, brokerage)
     closing_fixed = _normalise_closing_lines(plan, closing_line)
     if closing_fixed:
         engine_notes.append(
@@ -730,6 +988,8 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     # --- persist ------------------------------------------------------------
     missing_info = list(plan.get("missingInfo") or []) if isinstance(plan, dict) else []
     missing_info = _scrub_stale_video_notes(missing_info, plan)
+    if missing_info_early:
+        missing_info.append(missing_info_early)
     # Report a repair in plain words; the technical form stays in the API's "repairs".
     for note in repairs:
         m = re.match(r"video mix: (\d+)/(\d+) video posts repaired to (\d+)/(\d+)", note)
@@ -757,10 +1017,13 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
 
     url_by_file = _asset_url_map(assets)
     # A plan that names no photo leaves a blank card even though the gallery is full (the
-    # model answers "NEEDS PHOTO" when it cannot tell the photos apart). Rotate the real
-    # photos through those slots instead: a caption about the house with a photo of the
-    # house beats an empty calendar square. Reported in the build notes, never silently.
-    gallery_urls = [getattr(a, "url", "") for a in photos if getattr(a, "url", "")]
+    # model answers "NEEDS PHOTO" when it cannot tell the photos apart). Fill those slots from
+    # the ranked gallery - strongest selling photo first, each used once - never from upload
+    # order, so a blank slot never becomes a photo of the laundry room.
+    gallery_urls = [
+        {"url": getattr(a, "url", ""), "score": (_photo_strength(a)[1] * -1)}
+        for a in galleries_ranked(intact) if getattr(a, "url", "")
+    ]
 
     base_date = date.today()
     if getattr(boost, "go_live_date", None):
@@ -869,9 +1132,9 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
 
     if rotated:
         engine_notes.append(
-            f"{rotated} post(s) had no photo named by the plan and were given photos from the "
-            "listing gallery in upload order; re-tag or reorder the gallery to control which photo "
-            "each post uses.")
+            f"{rotated} post(s) had no photo named by the plan and were given the strongest "
+            "unused photos from the gallery (highest SOCIAL score first), so no photo repeats "
+            "until the gallery runs out.")
 
     return {
         "source": source,

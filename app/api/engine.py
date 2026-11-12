@@ -29,6 +29,22 @@ router = APIRouter()
 # once; the UI and the deploy checks follow it through /build-status.
 _BUILDS: dict = {}
 
+# The event loop only holds a WEAK reference to a task, so a build started with a bare
+# asyncio.create_task() can be garbage-collected mid-run: the boost stays "In Progress" for
+# ever, no post is written and no error is logged (that is what killed the 9 Nov build).
+# Keep a strong reference for as long as the task is alive.
+_BUILD_TASKS: set = set()
+
+# A build that has not finished in this long is not running any more. Without a deadline the
+# status endpoint reports a dead run as "running" until the process restarts.
+BUILD_DEADLINE_SECONDS = 15 * 60
+
+INTERRUPTED_ERROR = (
+    "The build stopped before it finished - the server restarted while it was running. "
+    "Nothing was lost: start the build again."
+)
+
+
 
 def _owned_boost(boost_id: int, current_user: User, db: Session) -> Boost:
     """Fetch a boost the caller may act on (owner, or an admin)."""
@@ -64,6 +80,10 @@ async def _run_build(boost_id: int, user_id: int, force: bool, openings: Optiona
         if not boost or not user:
             state.update({"status": "error", "error": "boost or user disappeared mid-build"})
             return
+        # Persist the start: if this process dies mid-build, /build-status can still tell the
+        # difference between "never started" and "started and was cut off".
+        _log(db, user, boost_id, "build_started", {"force": bool(force)})
+        db.commit()
         from app.services import llm
         result = await run_engine(boost, db, force=force, openings=openings)
         spent = llm.take_usage()
@@ -119,11 +139,37 @@ async def build_campaign(boost_id: int, body: BuildRequest = BuildRequest(),
     boost = _owned_boost(boost_id, current_user, db)
     require_paid(boost, current_user, db)
     state = _BUILDS.get(boost.id) or {}
-    if state.get("status") == "running" and not body.force:
+    if state.get("status") == "running" and not body.force and not _is_stale(state):
         return {"status": "running", "boost_id": boost.id, "started_at": state.get("started_at")}
-    asyncio.create_task(_run_build(boost.id, current_user.id, body.force, body.openings))
+    task = asyncio.create_task(_run_build(boost.id, current_user.id, body.force, body.openings))
+    _BUILD_TASKS.add(task)          # strong reference: the loop's own reference is weak
+    task.add_done_callback(_BUILD_TASKS.discard)
     _BUILDS[boost.id] = {"status": "running", "started_at": time.time(), "error": None}
     return {"status": "running", "boost_id": boost.id, "started_at": _BUILDS[boost.id]["started_at"]}
+
+
+def _is_stale(state: dict) -> bool:
+    """True when a run still says 'running' but has been going longer than any real build."""
+    started = state.get("started_at") or 0
+    return bool(started) and (time.time() - started) > BUILD_DEADLINE_SECONDS
+
+
+def _last_build_event(db: Session, boost_id: int):
+    """The most recent build-lifecycle event for this boost, if any."""
+    return (db.query(Event)
+            .filter(Event.boost_id == boost_id,
+                    Event.event_type.in_(("build_started", "campaign_built", "error")))
+            .order_by(Event.id.desc())
+            .first())
+
+
+def _mark_interrupted(db: Session, boost: Boost, reason: str, user_id: int | None = None):
+    """Say out loud that a build died, once, so the next status read is honest."""
+    boost.main_status = "Build failed"
+    uid = user_id or boost.user_id
+    if uid:
+        _log(db, User(id=uid), boost.id, "error", {"where": "build_campaign", "error": reason})
+    db.commit()
 
 
 @router.get("/boosts/{boost_id}/build-status")
@@ -132,9 +178,23 @@ def build_status(boost_id: int, current_user: User = Depends(get_current_user),
     """How the last build for this boost is going (the UI polls this instead of holding a request)."""
     boost = _owned_boost(boost_id, current_user, db)
     state = dict(_BUILDS.get(boost.id) or {})
+    posts = db.query(Post).filter(Post.boost_id == boost.id).count()
+    if state.get("status") == "running" and _is_stale(state):
+        # A run that never reports a finish is a dead run, not a slow one.
+        state = {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True}
+        _mark_interrupted(db, boost, "build exceeded the %d minute deadline"
+                          % (BUILD_DEADLINE_SECONDS // 60))
+        _BUILDS[boost.id] = dict(state)   # remember it: one report, not one per poll
     if not state:
-        posts = db.query(Post).filter(Post.boost_id == boost.id).count()
-        state = {"status": "done" if posts else "idle", "posts_created": posts}
+        # No run in this process: either nothing was ever built, or the process restarted
+        # mid-build (a free-tier instance restarts on every deploy). A start with no finish
+        # after it means the build was cut off - say so instead of "In Progress" for ever.
+        last = _last_build_event(db, boost.id)
+        if last is not None and last.event_type == "build_started" and posts == 0:
+            state = {"status": "error", "error": INTERRUPTED_ERROR, "interrupted": True}
+            _mark_interrupted(db, boost, "the server restarted while the build was running")
+        else:
+            state = {"status": "done" if posts else "idle", "posts_created": posts}
     state["boost_id"] = boost.id
     if state.get("started_at") and state.get("finished_at"):
         state["seconds"] = round(state["finished_at"] - state["started_at"], 1)

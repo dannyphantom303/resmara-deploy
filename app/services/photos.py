@@ -31,6 +31,57 @@ MAX_BYTES = 12 * 1024 * 1024
 # A 14-day campaign wants a different photo most days, and the importer used to stop at ten,
 # silently discarding the rest of the gallery. Twenty leaves room for a longer run.
 DEFAULT_LIMIT = 20
+
+_JPEG_END = b"\xff\xd9"
+_PNG_END = b"IEND\xaeB`\x82"
+
+
+def _strip_tail_padding(raw: bytes) -> bytes:
+    """Drop the NUL padding some upload paths append after a finished image.
+
+    37 photos in one production gallery arrived as a complete JPEG followed by up to a
+    megabyte of 0x00 bytes, padded out to exactly 3 MiB. The picture is whole — the padding is
+    dead weight that makes every later check (end marker, size, serving) look wrong. Trim it.
+    """
+    end = len(raw)
+    while end > 0 and raw[end - 1] == 0:
+        end -= 1
+    return raw if end == len(raw) else raw[:end]
+
+
+def clean_image_bytes(data) -> bytes:
+    """The photo's real bytes: NUL padding removed, everything else untouched."""
+    if not data:
+        return b""
+    try:
+        raw = data if isinstance(data, (bytes, bytearray)) else bytes(data)
+    except (TypeError, ValueError):
+        return b""
+    return _strip_tail_padding(bytes(raw))
+
+
+def looks_incomplete(data, filename: str = "") -> bool:
+    """True when the file has no end-of-image marker: a partial copy, not a usable photo.
+
+    A copy that stops mid-scan is useless — the vision model cannot read it and a published
+    post shows a broken picture. Padding is not damage, so NUL bytes after the end marker are
+    trimmed before the check.
+    """
+    if not data:
+        return False
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    raw = clean_image_bytes(data)
+    if not raw:
+        return False
+    if ext in ("jpg", "jpeg"):
+        if not raw.startswith(b"\xff\xd8"):
+            return True
+        return not raw.endswith(_JPEG_END)
+    if ext == "png":
+        return _PNG_END not in raw[-16:]
+    return False
+
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -533,9 +584,17 @@ async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.A
     client = client or _client()
     try:
         urls = await _photos_on_page(client, listing_url, limit, address, zipcode, trace)
-        if not urls and address:
-            urls = await _trulia_by_address(client, address, zipcode, limit, trace)
-        return urls
+        # A listing dashboard (Fotello, an MLS, a Drive folder) renders its gallery after a
+        # sign-in, so the public HTML holds one hero image at most. A handful of photos is not
+        # a gallery either: top it up from the address, which is the same inventory on Trulia.
+        if address and len(urls) < 4:
+            extra = await _trulia_by_address(client, address, zipcode, limit, trace)
+            for u in extra:
+                if u not in urls:
+                    urls.append(u)
+                if len(urls) >= limit:
+                    break
+        return urls[:limit]
     finally:
         if own:
             await client.aclose()
