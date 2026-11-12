@@ -60,6 +60,10 @@ TAG_CONCURRENCY = 4
 # One photo's vision call. Short enough that a model with no eyes (or a provider that stalls)
 # costs a minute per photo instead of the whole build.
 TAG_CALL_TIMEOUT = 60.0
+# A text-only model answers a photo with an empty reply; it cannot tag anything. When the
+# configured model does that on the first photo, tagging tries these once, in order, and keeps
+# whichever one can actually see. RESMARA_MODEL_VISION wins over the list when it is set.
+VISION_FALLBACK_MODELS = ("gemma4:31b",)
 
 # Rooms that stop a scroll, best first. Only used to break a tie between photos that scored the
 # same, so a hero exterior never loses to a laundry-room shot.
@@ -550,6 +554,38 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
     incomplete = []
 
     gate = asyncio.Semaphore(max(1, int(concurrency or 1)))
+    # Which model can see, decided once: the first photo settles it and every later photo
+    # uses the winner, so a blind model costs one extra call, not one per photo.
+    configured = settings.OPENAI_MODEL_VISION or settings.OPENAI_MODEL_CHECK
+    pick = {"model": configured, "settled": False}
+
+    async def _look(image_url: str) -> str:
+        candidates = [pick["model"]]
+        if not pick["settled"]:
+            candidates += [m for m in VISION_FALLBACK_MODELS if m not in candidates]
+        last: Exception | None = None
+        for model in candidates:
+            try:
+                line = await llm.chat_text(
+                    prompts.PHOTO_TAGGING_PROMPT,
+                    "Tag this listing photo.",
+                    model=model,
+                    images=[image_url] if image_url else None,
+                    max_completion_tokens=400,
+                    # One unreadable photo must cost a minute, not the whole build.
+                    timeout=TAG_CALL_TIMEOUT,
+                )
+                # A model with no eyes does not always fail loudly: one real text-only model
+                # answered "SOCIAL: 7" and nothing else, which parses as a tag and tells the
+                # planner nothing. A photo with no ROOM is not a tagged photo.
+                if "ROOM:" not in (line or "").upper():
+                    raise RuntimeError(f"{model} answered without a ROOM tag")
+                pick.update(model=model, settled=True)
+                return line
+            except Exception as exc:  # noqa: BLE001 - try the next model, then report
+                last = exc
+        pick["settled"] = True
+        raise last if last else RuntimeError("no model answered")
 
     async def _tag_one(asset):
         """One vision call. Returns (asset, tag line, error text, incomplete)."""
@@ -562,15 +598,7 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
                 if raw and photos_service.looks_incomplete(raw, name):
                     return asset, None, "the file stops before the end of the image", True
                 image_url = _image_content_url(asset, root)
-                line = await llm.chat_text(
-                    prompts.PHOTO_TAGGING_PROMPT,
-                    "Tag this listing photo.",
-                    model=settings.OPENAI_MODEL_CHECK,
-                    images=[image_url] if image_url else None,
-                    max_completion_tokens=400,
-                    # One unreadable photo must cost a minute, not the whole build.
-                    timeout=TAG_CALL_TIMEOUT,
-                )
+                line = await _look(image_url)
                 return asset, line, None, False
             except Exception as exc:  # keep going: one bad photo must not stop the batch
                 return asset, None, f"{type(exc).__name__}: {exc}", False
@@ -617,7 +645,8 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
 
     if db is not None:
         db.commit()
-    return {"tagged": tagged, "source": source, "errors": errors, "incomplete": incomplete}
+    return {"tagged": tagged, "source": source, "errors": errors, "incomplete": incomplete,
+            "model": pick["model"]}
 
 
 # ---------------------------------------------------------------------------
@@ -912,12 +941,12 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                 if tag_result.get("tagged"):
                     engine_notes.append(
                         f"Tagged {tag_result['tagged']} of {len(untagged)} listing photos before planning "
-                        f"(engine={tag_result.get('source')}, model={settings.OPENAI_MODEL_CHECK}).")
+                        f"(engine={tag_result.get('source')}, model={tag_result.get('model')}).")
                 else:
                     first_error = (tag_result.get("errors") or [{}])[0].get("error", "")
                     engine_notes.append(
                         "The vision model tagged none of the listing photos, so the plan could not "
-                        f"choose between them (model={settings.OPENAI_MODEL_CHECK})."
+                        f"choose between them (model={tag_result.get('model') or settings.OPENAI_MODEL_CHECK})."
                         + (f" First failure: {first_error[:160]}" if first_error else ""))
             except Exception as exc:  # tagging is an improvement, never a build blocker
                 engine_notes.append(f"Photo tagging failed ({type(exc).__name__}); planning continued.")

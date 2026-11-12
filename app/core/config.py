@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     OPENAI_MODEL_BRAND: str = os.getenv("RESMARA_MODEL_BRAND", "gpt-5.4-mini")
     OPENAI_MODEL_DESIGN: str = os.getenv("RESMARA_MODEL_DESIGN", "gpt-image-1")
     OPENAI_MODEL_CHECK: str = os.getenv("RESMARA_MODEL_CHECK", "gpt-5.4-mini")
+    # Photo tagging is the one job that needs eyes. A text-only model cannot tag a photo, so
+    # this names the vision model explicitly when the engine's default has none.
+    OPENAI_MODEL_VISION: str = os.getenv("RESMARA_MODEL_VISION", "")
     # Offline/mock mode: no outbound OpenAI or Meta calls, deterministic fixtures.
     # Never silently on in production — the engine reports source="offline" when it is.
     SIMULATE: bool = os.getenv("RESMARA_SIMULATE", "").lower() in ("1", "true", "yes")
