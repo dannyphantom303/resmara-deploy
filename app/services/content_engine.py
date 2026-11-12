@@ -57,6 +57,9 @@ AGENT_CARD_KEYS = (
 # sell the house. Tag all of them, a few at a time.
 MAX_TAG_PHOTOS = 60
 TAG_CONCURRENCY = 4
+# One photo's vision call. Short enough that a model with no eyes (or a provider that stalls)
+# costs a minute per photo instead of the whole build.
+TAG_CALL_TIMEOUT = 60.0
 
 # Rooms that stop a scroll, best first. Only used to break a tie between photos that scored the
 # same, so a hero exterior never loses to a laundry-room shot.
@@ -449,6 +452,52 @@ def _as_int(value):
     return None
 
 
+def _asset_bytes(asset) -> bytes:
+    """One photo's raw bytes: the uploaded file if this machine has it, else the stored row."""
+    name = str(getattr(asset, "filename", "") or "")
+    if name:
+        path = _uploads_dir() / name
+        try:
+            if path.is_file():
+                raw = path.read_bytes()
+                if raw:
+                    return raw
+        except OSError:
+            pass
+    stored = getattr(asset, "data", None)
+    try:
+        return bytes(stored) if stored else b""
+    except (TypeError, ValueError):
+        return b""
+
+
+def _shrink_for_vision(raw: bytes, mime: str = "") -> str:
+    """A data URL of the photo at 1280px: about 150 KB instead of five megabytes.
+
+    The model reads the same room from a 1280px JPEG as from the camera original, and the
+    original is what made a 56-photo build send 300 MB to the provider (and hold six megabytes
+    of base64 per photo in memory). Falls back to the untouched bytes when Pillow is missing.
+    """
+    try:
+        import base64
+        import io
+
+        from PIL import Image, ImageOps
+
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail((1280, 1280), Image.LANCZOS)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=82, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:  # noqa: BLE001 - a photo the model can read is better than none
+        import base64
+
+        return f"data:{mime or 'image/jpeg'};base64,{base64.b64encode(raw).decode()}"
+
+
 def _image_content_url(asset, root: str) -> str:
     """A URL the vision model can actually fetch.
 
@@ -460,27 +509,11 @@ def _image_content_url(asset, root: str) -> str:
     apart from the single model request.
     """
     name = str(getattr(asset, "filename", "") or "")
-    if name:
-        path = _uploads_dir() / name
-        try:
-            if path.is_file():
-                raw = path.read_bytes()
-                if len(raw) <= 8 * 1024 * 1024:
-                    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-                    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
-        except OSError:
-            pass  # fall through to the stored copy, then to the URL form
-    # A hosted instance starts with an empty uploads/, so the row's own bytes are the copy
-    # that is always there. Without this the vision model is handed a 404 and tags nothing.
-    stored = getattr(asset, "data", None)
-    if stored:
-        try:
-            raw = bytes(stored)
-            if raw and len(raw) <= 8 * 1024 * 1024:
-                mime = getattr(asset, "content_type", None) or "image/jpeg"
-                return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
-        except (TypeError, ValueError):
-            pass
+    raw = _asset_bytes(asset)
+    if raw and len(raw) <= 40 * 1024 * 1024:
+        mime = (mimetypes.guess_type(name)[0] if name else "")
+        mime = mime or getattr(asset, "content_type", None) or "image/jpeg"
+        return _shrink_for_vision(photos_service.clean_image_bytes(raw), mime)
     url = str(getattr(asset, "url", "") or "")
     if url.startswith("/") and root:
         return root + url
@@ -514,13 +547,20 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
         source = info.get("host") or info.get("provider") or "custom"
     tagged = 0
     errors = []
+    incomplete = []
 
     gate = asyncio.Semaphore(max(1, int(concurrency or 1)))
 
     async def _tag_one(asset):
-        """One vision call. Returns (asset, tag line, error text)."""
+        """One vision call. Returns (asset, tag line, error text, incomplete)."""
         async with gate:
             try:
+                # The bytes are loaded once, here: the completeness check and the 1280px copy
+                # both need them, and only this many photos are open at a time.
+                raw = _asset_bytes(asset)
+                name = str(getattr(asset, "original_name", "") or getattr(asset, "filename", "") or "")
+                if raw and photos_service.looks_incomplete(raw, name):
+                    return asset, None, "the file stops before the end of the image", True
                 image_url = _image_content_url(asset, root)
                 line = await llm.chat_text(
                     prompts.PHOTO_TAGGING_PROMPT,
@@ -528,14 +568,19 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
                     model=settings.OPENAI_MODEL_CHECK,
                     images=[image_url] if image_url else None,
                     max_completion_tokens=400,
+                    # One unreadable photo must cost a minute, not the whole build.
+                    timeout=TAG_CALL_TIMEOUT,
                 )
-                return asset, line, None
+                return asset, line, None, False
             except Exception as exc:  # keep going: one bad photo must not stop the batch
-                return asset, None, f"{type(exc).__name__}: {exc}"
+                return asset, None, f"{type(exc).__name__}: {exc}", False
 
     results = await asyncio.gather(*[_tag_one(a) for a in assets])
 
-    for a, line, failure in results:
+    for a, line, failure, is_incomplete in results:
+        if is_incomplete:
+            incomplete.append(getattr(a, "id", None))
+            continue
         if failure:
             errors.append({
                 "asset_id": getattr(a, "id", None),
@@ -572,7 +617,7 @@ async def tag_assets(assets, *, base_url: str = "", db=None,
 
     if db is not None:
         db.commit()
-    return {"tagged": tagged, "source": source, "errors": errors}
+    return {"tagged": tagged, "source": source, "errors": errors, "incomplete": incomplete}
 
 
 # ---------------------------------------------------------------------------
@@ -832,24 +877,13 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     assets = (db.query(Asset).filter(Asset.boost_id == boost.id).all()
               if db is not None else [])
     photos = [a for a in assets if getattr(a, "kind", "photo") == "photo"]
-    # A photo that ends mid-file (a partial bulk download) cannot be seen by the vision model
-    # and would publish as a broken image, so it never reaches the index the plan chooses from.
-    intact, broken = [], []
-    for a in photos:
-        data = getattr(a, "data", None)
-        name = getattr(a, "original_name", "") or getattr(a, "filename", "") or ""
-        if data and photos_service.looks_incomplete(data, name):
-            broken.append(a)
-        else:
-            intact.append(a)
+    # A photo that ends mid-file (a partial download, a copy that never finished) cannot be
+    # seen by the vision model and would publish as a broken image. That is checked while the
+    # photo is already in memory for tagging - reading every blob here just to look at its last
+    # two bytes pulled 220 MB into a 512 MB instance and stopped the build dead.
+    intact, broken = list(photos), []
     photo_index = build_photo_index(intact)
     no_photos = len(intact) == 0
-    if broken:
-        engine_notes.append(
-            f"{len(broken)} of the {len(photos)} uploaded photos are incomplete files (they stop "
-            "before the end of the image, usually a partial download or a copy that never "
-            "finished). They were left out: the plan can only choose from the "
-            f"{len(intact)} photo(s) that are whole. Re-export or re-upload the rest.")
 
     # --- photos must be seen before the plan can name them -------------------
     # A freshly imported gallery carries no room/tags, and a plan written from an untagged
@@ -864,6 +898,15 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                     untagged[:MAX_TAG_PHOTOS], base_url=settings.PUBLIC_BASE_URL, db=db)
                 if db is not None:
                     db.commit()
+                broken_ids = set(tag_result.get("incomplete") or [])
+                if broken_ids:
+                    broken = [a for a in photos if getattr(a, "id", None) in broken_ids]
+                    intact = [a for a in photos if getattr(a, "id", None) not in broken_ids]
+                    engine_notes.append(
+                        f"{len(broken)} of the {len(photos)} uploaded photos stop before the end "
+                        "of the image (a partial download or a copy that never finished). They "
+                        "were left out: the plan can choose from the "
+                        f"{len(intact)} photo(s) that are whole. Re-export or re-upload the rest.")
                 say("photos tagged", tagged=tag_result.get("tagged"),
                     photos=len(intact), engine=tag_result.get("source"))
                 if tag_result.get("tagged"):
@@ -871,9 +914,11 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
                         f"Tagged {tag_result['tagged']} of {len(untagged)} listing photos before planning "
                         f"(engine={tag_result.get('source')}, model={settings.OPENAI_MODEL_CHECK}).")
                 else:
+                    first_error = (tag_result.get("errors") or [{}])[0].get("error", "")
                     engine_notes.append(
                         "The vision model tagged none of the listing photos, so the plan could not "
-                        f"choose between them (model={settings.OPENAI_MODEL_CHECK}).")
+                        f"choose between them (model={settings.OPENAI_MODEL_CHECK})."
+                        + (f" First failure: {first_error[:160]}" if first_error else ""))
             except Exception as exc:  # tagging is an improvement, never a build blocker
                 engine_notes.append(f"Photo tagging failed ({type(exc).__name__}); planning continued.")
             photo_index = build_photo_index(intact)

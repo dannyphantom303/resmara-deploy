@@ -456,6 +456,7 @@ async def chat_text(
     images: list | None = None,
     max_completion_tokens: int = 400,
     reasoning_effort: str | None = None,
+    timeout: float | None = None,
 ) -> str:
     """Chat Completions call returning the message content as plain text.
 
@@ -481,7 +482,10 @@ async def chat_text(
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
 
-    data = await _post("/chat/completions", payload)
+    # A per-call timeout matters here: tagging sends a photo to a model that may not be able to
+    # read images at all, and a provider that answers nothing for three minutes per photo turns
+    # one gallery into a build that never finishes.
+    data = await _post("/chat/completions", payload, timeout=timeout)
     content = _reply_text(data)
     if content is None:
         raise LLMError(f"chat_text: unexpected response shape: {str(data)[:300]}")

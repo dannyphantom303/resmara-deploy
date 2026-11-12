@@ -117,7 +117,8 @@ def test_deploy_package_is_complete():
 
     reqs = (ROOT / "requirements.txt").read_text()
     # Import name -> distribution name, for the few that differ. Extras ([bcrypt]) come off.
-    alias = {"dotenv": "python_dotenv", "jose": "python_jose", "multipart": "python_multipart"}
+    alias = {"dotenv": "python_dotenv", "jose": "python_jose", "multipart": "python_multipart",
+             "PIL": "pillow"}
     pinned = set()
     for line in reqs.splitlines():
         line = line.split("#")[0].strip()
