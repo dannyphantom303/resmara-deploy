@@ -161,13 +161,13 @@ async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User
     urls = [u.strip() for u in (payload.urls or []) if (u or "").strip()][:limit]
     source = "urls"
     listed = 0
+    trace: list = []
     if not urls:
         if not (payload.listing_url or "").strip():
             raise HTTPException(status_code=400, detail="Give a listing URL or at least one image URL.")
         try:
             # Pass the campaign's own address so a walled host (Zillow, Realtor, Redfin,
             # Homes.com) can be resolved through Trulia, which serves the same inventory.
-            trace: list = []
             urls = await photos.discover(payload.listing_url.strip(), limit=limit,
                                          address=boost.address or "", trace=trace)
         except Exception as exc:  # a bot wall or a dead page is the caller's problem to see
@@ -188,10 +188,19 @@ async def import_photos_endpoint(payload: PhotoImportRequest, current_user: User
         db, user_id=current_user.id, boost_id=boost.id, urls=urls,
         upload_dir=UPLOAD_DIR, limit=limit,
     )
-    result.update({"boost_id": boost.id, "source": source, "found": listed or len(urls)})
+    result.update({"boost_id": boost.id, "source": source, "found": listed or len(urls),
+                   "tried": trace})
     if not result["imported"]:
         result["detail"] = ("Nothing could be downloaded. Use direct image URLs "
                             "(right-click a photo → Copy image address) or upload files.")
+    elif source == "listing_url" and result["imported"] < 4:
+        # One or two photos is not a gallery, and saying "imported 1" implies it worked.
+        # Name what the link exposed and what to do about it.
+        result["detail"] = (
+            f"That link gave up only {result['imported']} photo(s) — the page keeps the rest "
+            "of its gallery behind a sign-in, and the same property could not be matched on "
+            "Trulia from this address. Upload the photos, paste the direct image addresses, "
+            "or use the listing's public link (Trulia or Movoto).")
     return result
 
 

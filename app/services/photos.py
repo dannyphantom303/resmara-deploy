@@ -172,6 +172,52 @@ def _walk_json_images(node, out: list) -> None:
             _walk_json_images(value, out)
 
 
+_SCRIPT_BLOCK_RE = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
+_SCRIPT_LD_RE = re.compile(r"type\s*=\s*[\"']application/ld\+json", re.I)
+_SCRIPT_URL_RE = re.compile(
+    r"https?://[^\s\"'<>\\]+?\.(?:jpe?g|png|webp)(?:\?[^\s\"'<>\\]*)?", re.I)
+
+
+def _script_image_urls(html: str) -> list[str]:
+    """Image URLs sitting in the page's own inline JSON, which is where MLS galleries live.
+
+    An MLS / IDX detail page renders its photo viewer from a data blob: the address, the
+    price and ``"photos": [...]`` are all in one <script>. Nothing in <img> tags exposes
+    more than the hero, so a login-walled MLS link used to import exactly one photo. The
+    blob is JSON with escaped slashes (``https:\\/\\/cdn...\\/1-o.jpg``), so both spellings
+    are normalised before the URLs are read out.
+    """
+    out: list[str] = []
+    for match in _SCRIPT_BLOCK_RE.finditer(html or ""):
+        block = match.group(0)
+        if _SCRIPT_LD_RE.search(block[:600]):
+            continue                      # structured data is already read, in order
+        text = match.group(1)
+        low = text.lower()
+        if not any(token in low for token in (".jpg", ".jpeg", ".png", ".webp")):
+            continue
+        text = text.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
+        out.extend(_SCRIPT_URL_RE.findall(text))
+    return out
+
+
+def _gallery_group(urls: list[str]) -> list[str]:
+    """Keep the URLs that belong to one gallery: same host, same folder, two or more.
+
+    A portal page carries other listings' thumbnails and ad images in the same JSON. The
+    house's own photos share a folder (``.../bigphoto/848/26-2848_7_K.jpg``), so keeping
+    the largest such group is the difference between the gallery and a stranger's house.
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for url in urls:
+        parsed = urlparse(url)
+        groups.setdefault((parsed.netloc.lower(), os.path.dirname(parsed.path)), []).append(url)
+    if not groups:
+        return []
+    best = max(groups.values(), key=len)
+    return best if len(best) >= 2 else urls
+
+
 def extract_image_urls(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[str]:
     """Gallery URLs from a listing page, best first, absolute and de-duplicated.
 
@@ -200,6 +246,9 @@ def extract_image_urls(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> 
         except (ValueError, TypeError):
             continue
         _walk_json_images(data, found)
+
+    # A gallery rendered from an inline data blob (MLS / IDX pages) is invisible to the tags.
+    found.extend(_gallery_group(_script_image_urls(html)))
 
     for tag in _IMG_RE.findall(html):
         a = _attrs(tag)
@@ -475,13 +524,94 @@ def _host(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+_STREET_SUFFIX_RE = re.compile(
+    r"\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|way|blvd|boulevard|pl|place|"
+    r"ter|terrace|hwy|highway|loop|cir|circle|pkwy|parkway|trl|trail|sq|square|pt|point)\b",
+    re.I)
+_STATE_ZIP_RE = re.compile(r"\b([A-Z]{2})\b\s*(\d{5}(?:-\d{4})?)?\s*$")
+
+
+def parse_address(text: str) -> tuple[str, str, str, str]:
+    """(street, city, state, zip) from however an owner typed the address.
+
+    Two shapes reach this function and only one of them used to work:
+
+        892 Coggins St, Redding, CA 96003   -> commas, the form hint
+        892 Coggins Street Redding CA       -> what the campaign actually held
+
+    The Trulia fallback needs the city and state, and it was reading them out of a
+    comma pattern; an address without commas answered "no city", the fallback was
+    skipped without a word, and an MLS link that exposes one hero photo imported one
+    photo. So the parse no longer depends on punctuation.
+    """
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if not text:
+        return "", "", "", ""
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    state, zipcode = "", ""
+    tail = parts[-1] if parts else text
+    m = _STATE_ZIP_RE.search(tail)
+    if m:
+        state, zipcode = m.group(1), m.group(2) or ""
+        rest = tail[:m.start()].strip(" ,")
+        parts = parts[:-1] + ([rest] if rest else [])
+
+    if len(parts) >= 2:
+        street, city = parts[0], parts[-1]
+    else:
+        tokens = text.split()
+        if zipcode and re.fullmatch(r"\d{5}(?:-\d{4})?", tokens[-1]):
+            tokens = tokens[:-1]
+        if state and tokens and tokens[-1].upper() == state:
+            tokens = tokens[:-1]
+        city_tokens: list[str] = []
+        while tokens and len(city_tokens) < 3:
+            word = tokens[-1]
+            # A street suffix means everything left is the street, not more city.
+            if _STREET_SUFFIX_RE.fullmatch(word):
+                break
+            city_tokens.insert(0, tokens.pop())
+            if len(city_tokens) == 1:
+                break
+        street, city = " ".join(tokens), " ".join(city_tokens)
+    return street, re.sub(r"\s+", " ", city).strip(), state, zipcode
+
+
+def _city_candidates(address: str, state: str) -> list[str]:
+    """City page slugs to try, most likely first ('Redding', then 'rancho-cordova')."""
+    parts = [p.strip() for p in (address or "").split(",") if p.strip()]
+    if len(parts) >= 2:
+        spelled = re.sub(r"[^A-Za-z ]+", "", parts[-1]).strip()
+        return [spelled.replace(" ", "-")] if spelled else []
+    tokens = [t for t in re.split(r"[^A-Za-z0-9]+", address or "") if t]
+    if state and tokens and tokens[-1].upper() == state:
+        tokens = tokens[:-1]
+    out: list[str] = []
+    for size in (1, 2):
+        if len(tokens) <= size:
+            break
+        words = tokens[-size:]
+        if any(_STREET_SUFFIX_RE.fullmatch(w) or w.isdigit() for w in words):
+            continue
+        out.append(" ".join(words))
+    return out
+
+
+def _trulia_city_urls(address: str, zipcode: str) -> list[str]:
+    """Candidate Trulia city pages for an address, whatever punctuation it arrived with."""
+    _, _, state, _ = parse_address(address)
+    if not state:
+        m = re.search(r"\b([A-Z]{2})\b", address or "")
+        state = m.group(1) if m else ""
+    if not state:
+        return []
+    return [f"https://www.trulia.com/{state}/{slug}/" for slug in _city_candidates(address, state)]
+
+
 def _trulia_city_url(address: str, zipcode: str) -> str:
     """Best guess at a Trulia city page for an address ('1234 Elm St, Redding, CA')."""
-    m = re.search(r",\s*([^,]+),\s*([A-Z]{2})\b", address or "")
-    if not m:
-        return ""
-    city = re.sub(r"[^A-Za-z ]+", "", m.group(1)).strip().replace(" ", "-")
-    return f"https://www.trulia.com/{m.group(2)}/{city}/"
+    urls = _trulia_city_urls(address, zipcode)
+    return urls[0] if urls else ""
 
 
 READER_BASE = "https://r.jina.ai/"          # renders the page on their infrastructure
@@ -593,14 +723,22 @@ def address_from_url(listing_url: str) -> str:
 
 async def _trulia_by_address(client: httpx.AsyncClient, address: str, zipcode: str,
                              limit: int, trace: list | None) -> list[str]:
-    city_url = _trulia_city_url(address, zipcode)
-    if not city_url:
-        return []
-    html = await _fetch_html(client, city_url, trace)
-    match = match_listing(trulia_listings(html), address, zipcode) if html else None
-    if not match:
-        return []
-    return await _photos_on_page(client, match["url"], limit, address, zipcode, trace)
+    """The same property on Trulia, found from the campaign's own address.
+
+    The city page is a guess, so more than one spelling is tried ('Redding', then
+    'rancho-cordova'); a page that yields listings but not this house means the guess was
+    right and the property simply is not on Trulia, so it stops there instead of walking
+    every candidate and burning a fetch each.
+    """
+    for city_url in _trulia_city_urls(address, zipcode):
+        html = await _fetch_html(client, city_url, trace)
+        rows = trulia_listings(html) if html else []
+        match = match_listing(rows, address, zipcode) if rows else None
+        if match:
+            return await _photos_on_page(client, match["url"], limit, address, zipcode, trace)
+        if rows:
+            break
+    return []
 
 
 async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.AsyncClient | None = None,
@@ -628,13 +766,21 @@ async def discover(listing_url: str, limit: int = DEFAULT_LIMIT, client: httpx.A
         # sign-in, so the public HTML holds one hero image at most. A handful of photos is not
         # a gallery either: top it up from the address, which is the same inventory on Trulia.
         lookup = address or address_from_url(listing_url)
-        if lookup and len(urls) < 4:
-            extra = await _trulia_by_address(client, lookup, zipcode, limit, trace)
-            for u in extra:
-                if u not in urls:
-                    urls.append(u)
-                if len(urls) >= limit:
-                    break
+        if len(urls) < 4:
+            if lookup:
+                _, _, _, parsed_zip = parse_address(lookup)
+                extra = await _trulia_by_address(client, lookup, zipcode or parsed_zip,
+                                                limit, trace)
+                for u in extra:
+                    if u not in urls:
+                        urls.append(u)
+                    if len(urls) >= limit:
+                        break
+            elif trace is not None:
+                # The campaign had no address and the link carried none either, so the one
+                # route that survives a walled MLS page had nothing to look up. Say it, so
+                # "only one photo came in" has a cause attached to it.
+                trace.append({"url": "", "outcome": "no address to look the property up by"})
         return urls[:limit]
     finally:
         if own:

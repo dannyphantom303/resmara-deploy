@@ -143,6 +143,88 @@ def main() -> int:
     check("a zip mismatch is not a match",
           photos.match_listing(rows, "1354 Harpole Rd, Redding, CA", "99999") is None)
 
+    # --- an MLS / IDX page: the gallery is in an inline blob, not in any tag --------------
+    # This is the shape of a real MLS detail page: one og:image hero, the photo viewer's
+    # data in a <script> with escaped slashes, and other people's ads in the same blob.
+    MLS_PAGE = r"""<html><head><title>892 Coggins St | MLS 26-2848</title>
+<meta property="og:image" content="https://cdn.mls.example.test/hero-o.jpg">
+<script>window.__LISTING__={"photos":[
+  {"url":"https:\/\/cdn.mls.example.test\/photos\/848\/26-2848_1.jpg"},
+  {"url":"https:\/\/cdn.mls.example.test\/photos\/848\/26-2848_2.jpg"},
+  {"url":"https:\/\/cdn.mls.example.test\/photos\/848\/26-2848_3.jpg"}],
+  "ads":[{"img":"https:\/\/ads.example.test\/banners\/agent-ad.jpg"}]};</script>
+</head><body><img src="https://cdn.mls.example.test/brand/logo.png"></body></html>""" + "<!-- " + "x" * 2100 + " -->"
+    mls = photos.extract_image_urls(MLS_PAGE, "https://www.mls.example.test/listing/26-2848", limit=10)
+    check("an MLS page's inline gallery is read, not just its hero",
+          sum(1 for u in mls if "26-2848_" in u) == 3, str(mls))
+    check("escaped slashes are normalised",
+          all("\\" not in u for u in mls), str(mls))
+    check("another advertiser's image is not part of the gallery",
+          not any("agent-ad" in u for u in mls), str(mls))
+
+    # --- the address, however it was typed ----------------------------------------------
+    # Adam's campaign held "892 Coggins Street Redding CA". The old parser demanded commas,
+    # answered "no city", and the Trulia top-up was skipped without a word.
+    for typed, want in [
+        ("892 Coggins Street Redding CA", ("892 Coggins Street", "Redding", "CA", "")),
+        ("892 Coggins St, Redding, CA 96003", ("892 Coggins St", "Redding", "CA", "96003")),
+        ("1354 Harpole Rd Redding CA 96002", ("1354 Harpole Rd", "Redding", "CA", "96002")),
+    ]:
+        got = photos.parse_address(typed)
+        check(f"address parses: {typed}", got == want, str(got))
+    check("a comma-less address still yields a Trulia city page",
+          photos._trulia_city_urls("892 Coggins Street Redding CA", "") ==
+          ["https://www.trulia.com/CA/Redding/"],
+          str(photos._trulia_city_urls("892 Coggins Street Redding CA", "")))
+
+    # --- the top-up actually fires, and it fires for the right city ----------------------
+    CITY_PAGE = """<script type="application/ld+json">
+    {"@type":"Product","offers":{"url":"https://www.trulia.com/home/892-coggins-st-redding-ca-96003--1","price":599900},
+     "itemOffered":{"numberOfBedrooms":3,"numberOfBathroomsTotal":2}}
+    </script>""" + "<!-- " + "y" * 2100 + " -->"
+    DETAIL_PAGE = """<script id="__NEXT_DATA__" type="application/json">
+    {"props":{"homeDetails":{"media":{"photos":[
+      {"url":{"large":"https://www.trulia.com/pictures/thumbs_5/zillowstatic/fp/cccc3333-full.jpg"}},
+      {"url":{"large":"https://www.trulia.com/pictures/thumbs_5/zillowstatic/fp/dddd4444-full.jpg"}},
+      {"url":{"large":"https://www.trulia.com/pictures/thumbs_5/zillowstatic/fp/eeee5555-full.jpg"}}]}}}}
+    </script>""" + "<!-- " + "z" * 2100 + " -->"
+    hits: list[str] = []
+
+    # The login-walled shape: the public HTML holds the hero and nothing else.
+    MLS_HERO_PAGE = ("""<html><head><meta property="og:image" """
+                     """content="https://cdn.mls.example.test/hero-o.jpg"></head>"""
+                     """<body><img src="https://cdn.mls.example.test/brand/logo.png">"""
+                     """<p>Sign in to view the photo gallery</p></body></html>"""
+                     + "<!-- " + "w" * 2100 + " -->")
+
+    def mls_handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        hits.append(url)
+        if "mls.example.test" in url:
+            return httpx.Response(200, text=MLS_HERO_PAGE)
+        if url == "https://www.trulia.com/CA/Redding/":
+            return httpx.Response(200, text=CITY_PAGE)
+        if url.startswith("https://www.trulia.com/home/892-coggins"):
+            return httpx.Response(200, text=DETAIL_PAGE)
+        return httpx.Response(404, text="nope")
+
+    async def run_top_up():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(mls_handler),
+                                     follow_redirects=True) as mock:
+            trace = []
+            got = await photos.discover("https://www.mls.example.test/listing/26-2848",
+                                        limit=20, client=mock,
+                                        address="892 Coggins Street Redding CA", trace=trace)
+            return got, trace
+
+    topped, top_trace = asyncio.run(run_top_up())
+    check("a one-photo MLS link is topped up from the address", len(topped) >= 4, str(topped))
+    check("the top-up asked Trulia for the right city",
+          "https://www.trulia.com/CA/Redding/" in hits, str(hits))
+    check("and the campaign's own photos came with it",
+          sum(1 for u in topped if "cccc3333" in u or "dddd4444" in u or "eeee5555" in u) == 3,
+          str(topped))
+
     # --- a walled site: direct 403, reader HTML, and the parsers must agree --------------
     # This is the production shape: Render's IP gets 403 from every listing portal, so the
     # page has to come back through the reader. If this test passes while production fails,
