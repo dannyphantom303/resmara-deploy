@@ -59,12 +59,23 @@ function deleteCampaign(key){
  const c=campaignByKey(key);if(!c)return;
  if(isSample(c)){hideCampaign(key);return}
  const id=campaignBoostId(c);
- const ok=confirm('Delete “'+c.address+'”?\n\nIts posts, ads and photos are removed from Resmara and cannot be brought back. Anything already published to Facebook or Instagram stays in Meta Ads Manager.');
- if(!ok)return;
+ if(id==null||!window.RM){toast('This campaign is not linked to a workspace yet.');return}
+ // An in-page confirm, not window.confirm: Chrome stops showing native dialogs on a tab once the
+ // owner ticks "prevent this page from creating additional dialogs", and after that Delete looked
+ // like a dead button. This one cannot be suppressed, and it says what is about to go.
+ show(`<span class="eyebrow">DELETE CAMPAIGN</span><h2>Delete “${esc(c.address)}”?</h2><p>Its posts, ads and photos are removed from Resmara and cannot be brought back. Anything already published to Facebook or Instagram stays in Meta Ads Manager.</p><p class="fine" role="alert"></p><div class="modal-actions"><button type="button" class="alt" onclick="modal.close()">Keep campaign</button><button type="button" class="danger" onclick="confirmDeleteCampaign('${esc(String(id))}')">Delete campaign</button></div>`);
+}
+function confirmDeleteCampaign(id){
+ const error=modal.querySelector('[role="alert"]'),button=modal.querySelector('.danger');
+ if(button){button.disabled=true;button.textContent='Deleting…'}
  RM.deleteBoost(id).then(()=>{
    state.campaigns=state.campaigns.filter(x=>String(campaignBoostId(x))!==String(id));
-   persist();campaignList();dashboard('campaigns');toast('Campaign deleted.');
- }).catch(e=>toast(((e&&e.message)||'Could not delete that campaign.')));
+   persist();dashboard('campaigns');toast('Campaign deleted.');
+ }).catch(e=>{
+   if(error)error.textContent=(e&&e.message)||'Could not delete that campaign. Try again.';
+   if(button){button.disabled=false;button.textContent='Delete campaign'}
+   toast(((e&&e.message)||'Could not delete that campaign.'));
+ });
 }
 function campaignList(){
  syncLiveCampaigns();

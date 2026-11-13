@@ -272,6 +272,8 @@ def list_posts(boost_id: int, current_user: User = Depends(get_current_user), db
     return [{
         "id": p.id, "day": p.day, "slot": p.slot, "kind": p.kind, "caption": p.caption,
         "hashtags": p.hashtags, "cta": p.cta, "image_url": p.image_url,
+        "title": p.title, "kicker": p.kicker, "overlay_text": p.overlay_text,
+        "photo_room": p.photo_room, "photo_file": p.photo_file, "post_type": p.post_type,
         "client_status": p.client_status, "publish_status": p.publish_status,
         "publish_at": p.publish_at, "publish_target": p.publish_target,
         "fb_post_id": p.fb_post_id, "ig_media_id": p.ig_media_id, "last_error": p.last_error,

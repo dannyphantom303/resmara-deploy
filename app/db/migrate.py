@@ -32,6 +32,14 @@ ADDITIONS = {
     "posts": [
         ("publish_target", "VARCHAR DEFAULT 'both'"),
         ("last_error", "TEXT"),
+        # The plan's creative (title, kicker, text overlay, which space the photo shows) used to be
+        # dropped when the post was written, so the calendar had nothing to show over the image.
+        ("title", "VARCHAR"),
+        ("kicker", "VARCHAR"),
+        ("overlay_text", "VARCHAR"),
+        ("photo_room", "VARCHAR"),
+        ("photo_file", "VARCHAR"),
+        ("post_type", "VARCHAR DEFAULT 'photo'"),
     ],
     "ads": [
         ("meta_adset_id", "VARCHAR"),

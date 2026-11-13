@@ -150,6 +150,31 @@ CAPTIONS ALREADY WRITTEN (match this voice, do not repeat these beats):
 PHOTO INDEX (file name | drive id | room | social score | shape | what is visible | STORY detail; strongest-selling photo first): {photo_index}
 '''
 
+# The copy is written for the photo that is actually on the post. When the gallery assignment moves
+# a post onto a different room (no two posts on one space), the plan's caption is no longer true,
+# so those posts get rewritten against the photo they now carry.
+R4_PHOTO_COPY_SYSTEM = '''You are writing the words that go with a photo on a real estate social campaign. Each item gives you the space the photo shows, what is visible in it, and any story detail. Write for THAT photo: a caption about the kitchen must not describe the bedroom.
+
+RULES:
+- One entry per requested day, same day and slot, nothing else.
+- The caption is about the space named in the item. Use only what the item and PROPERTY FACTS say; never invent a feature, distance, metric or amenity.
+- End every caption with the closing contact line exactly as given, on its own line.
+- title: 2-5 words naming the space, sentence case. kicker: 1-3 words, upper case, e.g. THE KITCHEN.
+- overlayText: the words that sit ON the photo. At most 6 words, no address, no emoji, no hashtags.
+- Every entry must sound different from the others; no repeated opening word.
+- hashtags: 3-6, no '#', no spaces.
+
+OUTPUT: return ONLY a JSON object: {"posts": [{"day": 1, "slot": 1, "title": "", "kicker": "", "overlayText": "", "caption": "", "hashtags": ["..."], "cta": ""}]}
+'''
+
+R4_PHOTO_COPY_USER = '''ADDRESS: {address}
+AGENT / BRAND: {brand_json}
+PROPERTY FACTS: {facts}
+CLOSING CONTACT LINE (ends every caption, exactly as written): {closing_line}
+PHOTOS TO WRITE FOR ({count}):
+{items}
+'''
+
 
 # ---------------------------------------------------------------------------
 # Model + parameter metadata, verbatim from the handoff doc 10 section 4.

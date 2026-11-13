@@ -279,6 +279,12 @@
     return request('/api/content/photo-index/' + segment(boostId));
   }
 
+  // The gallery in the order the engine uses it (strongest-selling photo first), with the space
+  // each photo shows — the photos panel reads this instead of raw upload order.
+  function gallery(boostId) {
+    return request('/api/content/gallery/' + segment(boostId));
+  }
+
   // Pull a listing's gallery (or direct image URLs) into the campaign.
   function importPhotos(boostId, opts) {
     opts = opts || {};
@@ -499,6 +505,7 @@
     publishNow: publishNow,
     report: report,
     photoIndex: photoIndex,
+    gallery: gallery,
     importPhotos: importPhotos,
     tagAssets: tagAssets,
     createTicket: createTicket,

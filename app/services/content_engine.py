@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import itertools
 import json
 import mimetypes
 import re
@@ -282,6 +283,227 @@ def post_image_urls(plan_posts, url_by_file: dict, gallery_urls) -> tuple[list[s
             picked += 1
         urls.append(choice or url or "")
     return urls, picked
+
+
+_ROOM_ALIASES = {
+    "primary": "primary bedroom", "master": "primary bedroom", "master bed": "primary bedroom",
+    "primary suite": "primary bedroom", "master suite": "primary bedroom",
+    "owner's suite": "primary bedroom", "owners suite": "primary bedroom",
+    "bedroom": "bedroom", "guest bedroom": "bedroom", "kids bedroom": "bedroom",
+    "living": "living room", "lounge": "living room", "family room": "living room",
+    "great room": "living room",
+    "dining": "dining room", "dining area": "dining room", "eat-in kitchen": "kitchen",
+    "kitchen": "kitchen", "chef's kitchen": "kitchen",
+    "bath": "bathroom", "bathroom": "bathroom", "powder room": "bathroom",
+    "exterior": "exterior", "front exterior": "exterior", "curb appeal": "exterior",
+    "backyard": "backyard", "back yard": "backyard", "yard": "backyard", "garden": "backyard",
+    "patio": "outdoor living", "porch": "outdoor living", "deck": "outdoor living",
+    "pool": "pool", "office": "office", "den": "office", "laundry": "laundry",
+    "garage": "garage", "aerial": "aerial", "drone": "aerial", "neighborhood": "aerial",
+    "entry": "entry", "foyer": "entry", "hallway": "hallway", "staircase": "hallway",
+}
+
+
+def room_family(asset) -> str:
+    """The space a photo shows, collapsed so two shots of one room cannot both run.
+
+    'Primary Bedroom', 'Master Suite' and 'primary bed' are one room; 'Aerial' and
+    'Neighborhood' are one. An untagged photo is its own room so it never blocks a real one.
+    """
+    raw = str(getattr(asset, "room", "") or _tag_value(asset, "ROOM")).strip().lower()
+    if not raw:
+        return f"photo-{getattr(asset, 'id', '') or id(asset)}"
+    for alias, family in _ROOM_ALIASES.items():
+        if alias in raw:
+            return family
+    return raw
+
+
+def assign_gallery(plan_posts, assets) -> list[dict]:
+    """One photo per post, never two posts on the same space while an unused room exists.
+
+    The plan names a photo for each post, but a model reading a 60-photo index happily puts two
+    shots of the primary suite on days 3 and 9. This walks the calendar in order: the named photo
+    stands when its room has not run yet, otherwise the post takes the strongest unused room. Only
+    when the listing runs out of photos does anything repeat, and then the photo that ran longest
+    ago comes back. Each entry is ``{"url","file","room","score","replaced"}``; ``replaced`` means
+    the caption was written for a different photo and has to be rewritten.
+    """
+    every = [a for a in galleries_ranked(assets) if getattr(a, "url", "")]
+    liked = [a for a in every if _photo_strength(a)[0] == 0]
+    if not liked:  # every photo was marked unusable: a campaign with no images is worse
+        liked = every
+    all_by_file = {}
+    for a in (assets or []):
+        for key in (getattr(a, "filename", ""), getattr(a, "original_name", "")):
+            if key:
+                all_by_file.setdefault(str(key), a)
+    # A video post animates a listing photo, so that image is already in the feed. Reserve it up
+    # front, or the same picture runs twice and the owner sees "the same shot again".
+    reserved = {a.url for a in (all_by_file.get(str(p.get("photoFile") or "").strip())
+                                for p in (plan_posts or []) if isinstance(p, dict)
+                                and str(p.get("kind") or "static") != "static")
+                if a is not None and getattr(a, "url", "")}
+    lead = [a for a in liked if a.url not in reserved] or liked
+    # A photo the engine liked least still beats showing the same picture twice.
+    spare = [a for a in every if a.url not in reserved and a not in lead]
+    ladder = lead + spare
+    lead_urls = {a.url for a in lead}
+    order = {id(a): i for i, a in enumerate(ladder)}
+    used_rooms: set = set()
+    used_urls: set = set()
+    last_pos: dict = {}          # url -> the post it last ran on, so a repeat stays as far apart as possible
+    out: list[dict] = []
+
+    def entry(a, replaced: bool, kind: str = "static") -> dict:
+        return {"url": a.url if a else "", "file": str(getattr(a, "filename", "") or ""),
+                "room": str(getattr(a, "room", "") or _tag_value(a, "ROOM")).strip() if a else "",
+                "see": str(getattr(a, "see", "") or ""), "story": str(getattr(a, "story", "") or ""),
+                "score": (_as_int(getattr(a, "social_score", None)) or 0) if a else 0,
+                "replaced": replaced, "kind": kind}
+
+    def pick(pred):
+        return next((a for a in ladder if pred(a)), None)
+
+    for post in (plan_posts or []):
+        kind = str(post.get("kind") or "static") if isinstance(post, dict) else "static"
+        named = str(post.get("photoFile") or "").strip() if isinstance(post, dict) else ""
+        wanted = all_by_file.get(named) if named and named.upper() != "NEEDS PHOTO" else None
+        if kind != "static":
+            # A video post runs on its own clip; it neither shows a listing photo nor uses up a room.
+            if wanted is not None and getattr(wanted, "url", ""):
+                used_urls.add(wanted.url)
+                last_pos[wanted.url] = len(out)
+            out.append(entry(wanted, False, kind))
+            continue
+        chosen, replaced = None, False
+        if (wanted is not None and wanted.url not in used_urls and wanted.url in lead_urls
+                and room_family(wanted) not in used_rooms):
+            chosen = wanted
+        else:
+            chosen = (pick(lambda a: room_family(a) not in used_rooms and a.url not in used_urls)
+                      or pick(lambda a: a.url not in used_urls)
+                      or (min(lead, key=lambda a: (last_pos.get(a.url, -1), order[id(a)])) if lead else None))
+            replaced = chosen is not None
+        if chosen is None:
+            out.append(entry(None, False))
+            continue
+        used_rooms.add(room_family(chosen))
+        used_urls.add(chosen.url)
+        last_pos[chosen.url] = len(out)
+        out.append(entry(chosen, replaced))
+    return out
+
+
+_CAPTION_FILL = (
+    "The light in here is the kind of thing photos only half capture, so it is worth seeing in person.",
+    "Nothing has been staged for the camera beyond what is already in the room.",
+    "This is the sort of detail buyers point at when they walk through and start planning.",
+    "Bring your own list and check it against the space; it holds up close.",
+)
+
+
+def _room_caption(room: str, see: str, story: str, closing_line: str = "") -> str:
+    """A caption that names the space in the photo and stays inside the 35..60 word rule.
+
+    Used when the model cannot be asked. It only ever repeats what the photo's own tags say, and it
+    pads or trims whole sentences so the caption passes the same rule as a model-written one.
+    """
+    space = (room or "home").strip().lower()
+    sentences = [f"Here is the {space}, photographed exactly as it looks today."]
+    for text in (see, story):
+        text = " ".join(str(text or "").split()).rstrip(".")
+        if text and text.lower() not in " ".join(sentences).lower():
+            sentences.append(text[:1].upper() + text[1:] + ".")
+    sentences.append("It is one of the parts of this house that does the selling, so take your time with it.")
+    body = " ".join(sentences)
+    while len(body.split()) > 58 and len(sentences) > 1:
+        sentences.pop()
+        body = " ".join(sentences)
+    fill = itertools.cycle(_CAPTION_FILL)
+    while len(body.split()) < 38:
+        body += " " + next(fill)
+    words = body.split()
+    if len(words) > 60:  # a long "what is visible" line: cut it, never pad past the rule
+        body = " ".join(words[:58]).rstrip(",;:-") + "."
+    return body + ("\n\n" + closing_line if closing_line else "")
+
+
+def _overlay_from(title: str, room: str, address: str = "") -> str:
+    """The words that sit on the photo: the plan's line, else the space, short enough to read.
+
+    An address is not an overlay — a model asked for "text on the image" likes to print the street,
+    which reads as a mistake in the feed.
+    """
+    street = " ".join((address or "").split()).lower()
+    for text in (title, (room or "").title()):
+        text = " ".join(str(text or "").split())
+        if not text or re.match(r"^\d+\s", text) or (street and text.lower() in street):
+            continue
+        return text[:42]
+    return ""
+
+
+async def _rewrite_creative(plan_posts, assignments, *, address: str, brand_json: str,
+                            facts: str, closing_line: str, engine_notes: list) -> int:
+    """Rewrite the copy of every post whose photo the assignment moved. Returns how many landed.
+
+    Deterministic copy is written first, from the photo's own tags, so a failed model call still
+    leaves a caption about the right room; the model is then asked to say it better in one call.
+    """
+    targets = [(i, p) for i, p in enumerate(plan_posts or [])
+               if isinstance(p, dict) and assignments[i].get("replaced")
+               and (p.get("kind") or "static") == "static"]
+    for i, p in targets:
+        a = assignments[i]
+        p["photoFile"] = a.get("file") or p.get("photoFile")
+        p["caption"] = _room_caption(a.get("room", ""), a.get("see", ""), a.get("story", ""),
+                                     closing_line)
+        p["title"] = str(p.get("title") or (a.get("room") or "").title())[:60]
+        p["kicker"] = str(p.get("kicker") or (a.get("room") or "").upper())[:24]
+        p["overlayText"] = p.get("overlayText") or _overlay_from(p["title"], a.get("room", ""))
+    if not targets:
+        return 0
+    items = "\n".join(
+        f"day {_as_int(p.get('day')) or 1} slot {_as_int(p.get('slot')) or 1} | room: "
+        f"{assignments[i].get('room') or 'unclear'} | see: {_trunc(assignments[i].get('see') or 'n/a', 180)}"
+        f" | story: {_trunc(assignments[i].get('story') or 'n/a', 160)}"
+        for i, p in targets)
+    try:
+        data = await llm.chat_json(
+            prompts.R4_PHOTO_COPY_SYSTEM,
+            prompts.R4_PHOTO_COPY_USER.format(
+                address=address, brand_json=_trunc(brand_json, 1500), facts=_trunc(facts, 1500),
+                closing_line=closing_line, count=len(targets), items=items),
+            model=settings.OPENAI_MODEL_PLAN, max_completion_tokens=6000,
+            reasoning_effort="low", timeout=120)
+    except Exception as exc:
+        engine_notes.append(
+            f"photo copy: {type(exc).__name__} — the captions were written from each photo's own tags.")
+        return 0
+    got = {}
+    for x in (data.get("posts") if isinstance(data, dict) else []) or []:
+        if isinstance(x, dict):
+            got[(_as_int(x.get("day")) or 1, _as_int(x.get("slot")) or 1)] = x
+    applied = 0
+    for i, p in targets:
+        x = got.get((_as_int(p.get("day")) or 1, _as_int(p.get("slot")) or 1))
+        if not x:
+            continue
+        caption = str(x.get("caption") or "").strip()
+        if caption:
+            if closing_line and closing_line not in caption:
+                caption += "\n\n" + closing_line
+            p["caption"] = caption
+            applied += 1
+        for key in ("title", "kicker", "overlayText", "cta"):
+            value = str(x.get(key) or "").strip()
+            if value:
+                p[key] = value[:60] if key != "cta" else value[:40]
+        tags = x.get("hashtags")
+        if isinstance(tags, list) and tags:
+            p["hashtags"] = tags[:6]
+    return applied
 
 
 def _asset_url_map(assets) -> dict:
@@ -1101,6 +1323,29 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     else:
         missing_info_early = None
     plan, repairs = _repair_video_mix(plan, days, per_day)
+    # --- gallery assignment: one photo per post, and one post per space -----
+    # The plan picks photos too, but a model reading the whole index will happily put two shots of
+    # the primary suite on days 3 and 9. Assigning here makes "never the same room twice" a rule of
+    # the campaign rather than a line in a prompt. A post that loses its photo gets its copy
+    # rewritten against the photo it now carries, so the caption never describes the wrong space.
+    plan_posts = plan.get("posts") if isinstance(plan, dict) else []
+    plan_posts = plan_posts if isinstance(plan_posts, list) else []
+    assignments = assign_gallery(plan_posts, intact)
+    replaced_n = sum(1 for a in assignments if a.get("replaced"))
+    if replaced_n:
+        say("writing photo copy", posts=replaced_n)
+        written = await _rewrite_creative(
+            plan_posts, assignments, address=address, brand_json=brand_json, facts=facts,
+            closing_line=closing_line, engine_notes=engine_notes)
+        engine_notes.append(
+            f"{replaced_n} post(s) moved off a space the calendar had already used; their copy "
+            f"was rewritten for the photo they carry"
+            + ("" if written else " from the photo's own room and detail tags"))
+        missing_info = plan.setdefault("missingInfo", []) if isinstance(plan, dict) else []
+        if isinstance(missing_info, list):
+            missing_info.append(
+                f"No space repeats in this campaign where the gallery had an unused room: "
+                f"{replaced_n} post(s) were reassigned to a different photo.")
     # Make the closing contact line real and on its own line BEFORE the rules are checked, so the
     # violation list describes the campaign the client will actually see.
     closing_fixed = _normalise_closing_lines(plan, closing_line)
@@ -1147,21 +1392,6 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
     boost.plan = plan
     boost.main_status = "Team Review"
 
-    url_by_file = _asset_url_map(assets)
-    # A plan that names no photo leaves a blank card even though the gallery is full (the
-    # model answers "NEEDS PHOTO" when it cannot tell the photos apart). Fill those slots from
-    # the ranked gallery - strongest selling photo first, each used once - never from upload
-    # order, so a blank slot never becomes a photo of the laundry room.
-    # The score carries the same order the PHOTO INDEX uses: a photo the model marked
-    # "POST: no" ranks below every usable photo however well it scored, and beyond that the
-    # SOCIAL score decides. -100 is enough to put an unusable photo behind a zero-scoring one.
-    gallery_urls = []
-    for a in galleries_ranked(intact):
-        if not getattr(a, "url", ""):
-            continue
-        usable, neg_score = _photo_strength(a)[0], _photo_strength(a)[1]
-        gallery_urls.append({"url": a.url, "score": (neg_score * -1) - (0 if usable else 100)})
-
     base_date = date.today()
     if getattr(boost, "go_live_date", None):
         try:
@@ -1180,7 +1410,8 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         )
 
     # delete-or-update posts for this boost
-    plan_images, rotated = post_image_urls(plan_posts, url_by_file, gallery_urls)
+    plan_images = [a.get("url", "") for a in assignments]
+    rotated = replaced_n
     if force and db is not None:
         db.query(Post).filter(Post.boost_id == boost.id).delete()
         existing: dict = {}
@@ -1212,7 +1443,19 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
         post.caption = caption + (("\n\n" + hashtags_str) if hashtags_str else "")
         post.hashtags = hashtags_str
         post.cta = p.get("cta")
+        # The photo and the words over it travel with the post; the calendar renders them and the
+        # item editor edits them. A plan-only overlay was invisible in the product.
+        photo = assignments[index] if index < len(assignments) else {}
         post.image_url = plan_images[index] if index < len(plan_images) else ""
+        post.photo_room = photo.get("room") or p.get("photoRoom") or ""
+        post.photo_file = photo.get("file") or str(p.get("photoFile") or "")[:200]
+        post.post_type = str(p.get("postType") or "photo")[:20]
+        post.title = str(p.get("title") or photo.get("room") or "")[:120] or None
+        post.kicker = str(p.get("kicker") or "")[:60] or None
+        post.overlay_text = (
+            _overlay_from(str(p.get("overlayText") or ""), "", address)
+            or _overlay_from(str(p.get("title") or ""), photo.get("room") or "", address)
+            or None)
         target_date = base_date + timedelta(days=day - 1)
         slot_time = time(9, 0) if slot == 1 else time(19, 0)
         post.publish_at = datetime.combine(target_date, slot_time).isoformat()
@@ -1270,9 +1513,8 @@ async def build_campaign(boost, db, *, force: bool = False, base_url: str = "",
 
     if rotated:
         engine_notes.append(
-            f"{rotated} post(s) had no photo named by the plan and were given the strongest "
-            "unused photos from the gallery (highest SOCIAL score first), so no photo repeats "
-            "until the gallery runs out.")
+            f"{rotated} post(s) were moved to a different photo so no space ran twice, and each "
+            "caption was written for the photo it now carries.")
 
     return {
         "source": source,

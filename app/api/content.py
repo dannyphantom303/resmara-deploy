@@ -230,6 +230,23 @@ def photo_index(boost_id: int, current_user: User = Depends(get_current_user), d
     return {"boost_id": boost_id, "assets": len(assets), "photo_index": build_photo_index(assets)}
 
 
+@router.get("/gallery/{boost_id}")
+def gallery(boost_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The gallery in the order the engine will use it: strongest-selling photo first.
+
+    The photos panel used to list the uploads in upload order, so the strip on screen said nothing
+    about the campaign. This is the same ranking the plan reads, with the room each photo shows.
+    """
+    from app.services.content_engine import _photo_strength, galleries_ranked, room_family
+    boost = _owned_boost(boost_id, current_user, db)
+    photos = galleries_ranked(db.query(Asset).filter(Asset.boost_id == boost.id).all())
+    return {"boost_id": boost.id, "count": len(photos), "photos": [{
+        "id": a.id, "url": a.url, "file": a.filename, "original_name": a.original_name,
+        "room": a.room or "", "space": room_family(a), "score": a.social_score,
+        "shape": a.shape, "usable": _photo_strength(a)[0] == 0,
+    } for a in photos]}
+
+
 # --- Content generation -------------------------------------------------------
 
 @router.post("/generate/content")

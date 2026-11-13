@@ -148,6 +148,14 @@ class Post(Base):
     hashtags = Column(Text, nullable=True)
     cta = Column(String, nullable=True)
     image_url = Column(Text, nullable=True)
+    # The creative the plan wrote, kept on the post: the calendar shows the overlay over the photo,
+    # and the item editor edits it. Without these columns the overlay died with the plan JSON.
+    title = Column(String, nullable=True)
+    kicker = Column(String, nullable=True)
+    overlay_text = Column(String, nullable=True)
+    photo_room = Column(String, nullable=True)
+    photo_file = Column(String, nullable=True)
+    post_type = Column(String, default="photo")
     design_asset_id = Column(Integer, nullable=True)
     client_status = Column(String, default="pending")  # pending, approved, change_requested
     publish_at = Column(String, nullable=True)      # set by the engine, acted on by the publisher
